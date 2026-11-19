@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { LIVE } from './open';
 import { asleep, cursor, DESK, dist, frames, openScene, point, scale, state, type Pt, type Spot } from './scene';
 
 // Без подсказки шнур висит неподвижно: иначе она качнула бы его посреди проверки.
@@ -150,4 +151,20 @@ test('нажатие на кнопку страницы не хватает ла
   expect(await cursor(page)).not.toBe('grabbing');
   await page.mouse.up();
   await expect.poll(async () => (await state(page)).on, { message: 'клик по кнопке включил лампу' }).toBe(true);
+});
+
+test('кнопка без адреса получает роль, фокус и клавиши Enter и пробел', async ({ page }) => {
+  test.skip(LIVE, 'адрес у кнопки убирает только стенд');
+  await openScene(page, '?nohref=1');
+  const control = page.locator('.vs-pull a');
+  await expect(control).not.toHaveAttribute('href', /.*/);
+  await expect(control).toHaveAttribute('role', 'button');
+  await expect(control).toHaveAttribute('tabindex', '0');
+  await control.focus();
+  const scrollY = await page.evaluate(() => window.scrollY);
+  await page.keyboard.press('Space');
+  await expect.poll(async () => (await state(page)).on, { message: 'пробел включил лампу' }).toBe(true);
+  expect(await page.evaluate(() => window.scrollY), 'пробел не прокрутил страницу').toBe(scrollY);
+  await page.keyboard.press('Enter');
+  await expect.poll(async () => (await state(page)).on, { message: 'Enter выключил лампу' }).toBe(false);
 });

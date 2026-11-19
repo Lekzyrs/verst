@@ -30,7 +30,13 @@ export function boot(): void {
     layers.dispose();
     root.dataset.vs = 'static';
   };
-  const view = mountView(layers, toStatic);
+  let view: VerstDebug | null = null;
+  try {
+    view = mountView(layers, toStatic);
+  } catch (error) {
+    // Сцена не собралась (например, контекст пропал при запуске): страница остаётся без неё, причина видна в консоли.
+    console.error(`[verst] сцена не запустилась: ${error instanceof Error ? error.message : String(error)}`, error);
+  }
   if (!view) {
     toStatic();
     return;

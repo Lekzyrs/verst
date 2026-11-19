@@ -58,8 +58,9 @@ function bindPage(doc: Document, toggle: () => void): { show(on: boolean): void;
   const labelBefore = label ? label.textContent : null;
   const pull = doc.querySelector<HTMLElement>(SEL.pull);
   const control = pull ? (pull.querySelector<HTMLElement>('a, button') ?? pull) : null;
-  // Ссылка и кнопка получают фокус и Enter сами. Остальным узлам это даём мы.
-  const needsKeys = control !== null && control.tabIndex < 0;
+  // Ссылка с адресом и кнопка получают фокус и Enter сами. Остальным узлам это даём мы.
+  // Свойству tabIndex тут верить нельзя: у ссылки без адреса браузеры отдают 0, хотя фокус она не получает.
+  const needsKeys = control !== null && !control.matches('a[href], button, input, [tabindex]');
 
   const press = (e: Event): void => {
     e.preventDefault(); // кнопка на Tilda — ссылка: перехода по ней быть не должно

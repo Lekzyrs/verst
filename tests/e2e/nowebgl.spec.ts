@@ -33,6 +33,23 @@ test('без WebGL страница остаётся как без скрипт�
   expect(errors).toEqual([]);
 });
 
+test('сцена не собралась: страница остаётся как без скрипта, причина в консоли', async ({ page }) => {
+  const errors = collectErrors(page);
+  // Контекст «есть», но работать с ним нельзя: сборка сцены падает.
+  await page.addInitScript(() => {
+    const original = HTMLCanvasElement.prototype.getContext;
+    HTMLCanvasElement.prototype.getContext = function (this: HTMLCanvasElement, type: string, ...rest: unknown[]) {
+      if (type === 'webgl2') return {};
+      return (original as (...args: unknown[]) => unknown).call(this, type, ...rest);
+    } as typeof original;
+  });
+  await open(page);
+  await page.waitForLoadState('load');
+  await expectPlainPage(page);
+  expect(errors.length, `ошибка в консоли одна: ${errors.join(' | ')}`).toBe(1);
+  expect(errors[0]).toContain('[verst] сцена не запустилась');
+});
+
 test('потеря контекста WebGL останавливает сцену и возвращает страницу', async ({ page }) => {
   const errors = collectErrors(page);
   await openScene(page);
