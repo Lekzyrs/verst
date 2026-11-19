@@ -7,7 +7,9 @@ export default defineConfig({
     baseURL: process.env.VERST_URL ?? 'http://localhost:5273/dev/',
   },
   projects: [
-    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // Без этого headless Chromium рисует WebGL программно (SwiftShader, около 20 кадров в секунду), и проверки,
+    // которые меряют время покоя сцены, зависят от скорости процессора. На macOS сцену рисует видеокарта через Metal.
+    { name: 'chromium', use: { ...devices['Desktop Chrome'], launchOptions: { args: process.platform === 'darwin' ? ['--use-angle=metal'] : [] } } },
     { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],

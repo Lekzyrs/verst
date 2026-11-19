@@ -9,7 +9,10 @@ body {
   color: #f4f1e4;
   font: 400 15px/1.35 'Sofia Sans', sans-serif;
   -webkit-font-smoothing: antialiased;
+  transition: color .5s ease;
 }
+/* Лампа горит: страница светлая, текст тёмный. Признак ставит сборка. */
+html[data-vs-light="on"] body { color: #141200; }
 
 /* Основа блока T396: на Tilda её даёт общий CSS Zero Block. overflow: hidden не даёт ?zoom растянуть страницу вбок. */
 .t396__artboard { position: relative; overflow: hidden; }

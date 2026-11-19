@@ -12,10 +12,23 @@ export interface Studio {
   contact: THREE.MeshBasicMaterial;
 }
 
-/** Исходные значения света и пола (лампа выключена). */
+/** Вид сцены: значения при выключенной (off) и при горящей (on) лампе, между ними всё меняется плавно. */
 export const LOOK = {
-  off: { sky: 0x8ea3da, ground: 0x15140c, hemi: 0.13, window: 0.5, env: 0.2, contact: 0.5 },
+  off: { sky: 0x8ea3da, ground: 0x15140c, hemi: 0.13, window: 0.5, windowShadow: 1, env: 0.2, contact: 0.5, floor: 0.42 },
+  // тень от окна слабеет, когда горит лампа: главным источником становится она
+  on: { ground: 0xb39a2c, hemi: 2.3, window: 0.3, windowShadow: 0.22, env: 0.6, contact: 0.3, floor: 0.26 },
+  spot: 78, // сила света панели на стол
+  dots: 3.4, // яркость горящей точки матрицы
+  halo: 0.42, // плотность ореола панели
 };
+
+/** Сколько света даёт лампа в этот момент. */
+export interface LampLight {
+  power: number; // 0..1: насколько лампа включена
+  level: number; // 0..1: средняя яркость матрицы
+  warmth: number; // 0..1: положение ручки теплоты
+  color: THREE.Color; // цвет диодов
+}
 
 /** Студия для отражений: один большой софтбокс, узкие полосы и тёмные стены. */
 function studioEnvironment(renderer: THREE.WebGLRenderer): THREE.Texture {
@@ -64,7 +77,7 @@ export function buildStudio(renderer: THREE.WebGLRenderer, lamp: LampModel): Stu
   scene.environmentIntensity = LOOK.off.env;
 
   // Пол прозрачный и показывает только тени: под ним виден HTML-фон.
-  const floor = new THREE.ShadowMaterial({ opacity: 0.34 });
+  const floor = new THREE.ShadowMaterial({ opacity: LOOK.off.floor });
   const floorMesh = new THREE.Mesh(new THREE.PlaneGeometry(90, 90), floor);
   floorMesh.rotation.x = -Math.PI / 2;
   floorMesh.receiveShadow = true;
@@ -101,4 +114,27 @@ export function buildStudio(renderer: THREE.WebGLRenderer, lamp: LampModel): Stu
 
   scene.add(lamp.root, lamp.beads, lamp.ring);
   return { scene, hemi, windowLight, spot, floor, contact: contactMesh.material };
+}
+
+const SKY = new THREE.Color(LOOK.off.sky);
+const GROUND_OFF = new THREE.Color(LOOK.off.ground);
+const GROUND_ON = new THREE.Color(LOOK.on.ground);
+const WHITE = new THREE.Color(0xffffff);
+const tint = new THREE.Color();
+const mix = (key: 'hemi' | 'window' | 'windowShadow' | 'env' | 'contact' | 'floor', q: number): number =>
+  LOOK.off[key] + (LOOK.on[key] - LOOK.off[key]) * q;
+
+/** Переводит свет студии из сумерек в свет лампы. */
+export function lightStudio(studio: Studio, light: LampLight): void {
+  const q = Math.min(Math.max(light.power, 0), 1);
+  studio.hemi.color.copy(SKY).lerp(tint.copy(light.color).lerp(WHITE, 0.8), q);
+  studio.hemi.groundColor.copy(GROUND_OFF).lerp(GROUND_ON, q);
+  studio.hemi.intensity = mix('hemi', q);
+  studio.windowLight.intensity = mix('window', q);
+  studio.windowLight.shadow.intensity = mix('windowShadow', q);
+  studio.scene.environmentIntensity = mix('env', q);
+  studio.contact.opacity = mix('contact', q);
+  studio.floor.opacity = mix('floor', q);
+  studio.spot.color.copy(light.color).lerp(WHITE, 0.25);
+  studio.spot.intensity = LOOK.spot * light.level * (0.85 + light.warmth * 0.3);
 }

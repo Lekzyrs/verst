@@ -8,6 +8,10 @@ const GRAVITY = 98;
 const SUBSTEP = 1 / 120;
 const MAX_ACCUMULATED = 0.1;
 const DAMPING = 0.992;
+// Слабое качание гаснет быстрее сильного, как от трения в звеньях: шнур встаёт за три секунды,
+// а не качается ещё столько же с размахом меньше пикселя, не давая сцене уснуть.
+const CALM_SPEED = 6e-3; // единиц за подшаг: ниже этой скорости затухание растёт
+const CALM_DAMPING = 0.95;
 const PASSES = 14;
 const TUG_TIME = 0.28;
 const RELEASE_DECAY = 26;
@@ -113,10 +117,11 @@ export class Chain {
 
   private substep(anchor: Vec3, out: Vec3, keepOut?: KeepOut): void {
     const { pos, prev, n, segment, cfg } = this;
+    const damping = CALM_DAMPING + (DAMPING - CALM_DAMPING) * Math.min(this.speed / CALM_SPEED, 1);
     for (let i = 1; i < n; i++) {
       const k = i * 3;
       for (let a = 0; a < 3; a++) {
-        const v = (pos[k + a] - prev[k + a]) * DAMPING;
+        const v = (pos[k + a] - prev[k + a]) * damping;
         prev[k + a] = pos[k + a];
         pos[k + a] += v;
       }
