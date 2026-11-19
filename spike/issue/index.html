@@ -1,0 +1,128 @@
+<!doctype html>
+<!-- ЧЕРНОВОЙ ПРОТОТИП (spike), концепция «Выпуск». На выброс: проверяет типографику и композицию. -->
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Прототип: выпуск № 07</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sofia+Sans:wght@400;500;1000&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --night: #2b2707; --day: #f2c200; --lit: 0%;
+    --fg: #f4f1e4;
+    --display: "Sofia Sans"; --display-weight: 1000; --display-track: -0.05em; --display-settings: normal; --display-lh: .76;
+    --text: "Sofia Sans";
+    --pad: clamp(16px, 2.6vw, 44px);
+  }
+  body[data-light="on"] { --fg: #141200; }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body { margin: 0; background: color-mix(in srgb, var(--day) var(--lit), var(--night)); color: var(--fg); font: 400 .9375rem/1.35 var(--text), system-ui, sans-serif; transition: color .5s ease; -webkit-font-smoothing: antialiased; overscroll-behavior-y: none; }
+  /* слои: огромный текст → прозрачный холст с предметом → мелкие подписи */
+  canvas#scene { position: fixed; inset: 0; width: 100vw; height: 100vh; height: 100lvh; display: block; z-index: 1; touch-action: pan-y; }
+  section { position: relative; min-height: 100vh; min-height: 100svh; }
+  /* Свет лампы на странице. Слои лежат над крупным текстом и под холстом.
+     Спад затемняет фон вдали от пятна; пятно высветляет цвет фона в режиме overlay и не трогает чёрные буквы. */
+  #falloff { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: var(--lit-n, 0);
+    background: radial-gradient(ellipse 72% 82% at var(--lx, 60%) var(--ly, 75%), rgba(34, 26, 0, 0) 0%, rgba(34, 26, 0, 0) 30%, rgba(34, 26, 0, .34) 100%); }
+  #poollight { position: fixed; left: 0; top: 0; width: 200px; height: 200px; margin: -100px 0 0 -100px; z-index: 0; pointer-events: none; opacity: 0;
+    background: radial-gradient(closest-side, rgba(255, 255, 255, .98), rgba(255, 255, 255, .5) 42%, rgba(255, 255, 255, 0) 100%); mix-blend-mode: overlay; will-change: transform, opacity; }
+  .poster { position: absolute; inset: 0; z-index: 0; overflow: hidden; pointer-events: none; display: flex; flex-direction: column; justify-content: center; padding: 0 var(--pad); }
+  .fit { margin: 0; font-family: var(--display), sans-serif; font-weight: var(--display-weight); letter-spacing: var(--display-track); font-variation-settings: var(--display-settings); line-height: var(--display-lh); white-space: nowrap; text-transform: uppercase; font-size: 20vw; width: max-content; font-variant-numeric: tabular-nums lining-nums; }
+  .poster.right { align-items: flex-end; }
+  .labels { position: absolute; inset: 0; z-index: 2; pointer-events: none; padding: calc(var(--pad) * 2.4) var(--pad) var(--pad); display: grid; grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr auto; gap: 12px; }
+  .labels > * { margin: 0; }
+  .labels a, .labels button { pointer-events: auto; }
+  .tl { grid-area: 1 / 1; } .tr { grid-area: 1 / 2; justify-self: end; text-align: right; }
+  .bl { grid-area: 3 / 1; align-self: end; } .br { grid-area: 3 / 2; justify-self: end; align-self: end; text-align: right; }
+  .num { font-family: var(--display), sans-serif; font-weight: var(--display-weight); letter-spacing: var(--display-track); font-variation-settings: var(--display-settings); font-size: clamp(2rem, 4.2vw, 4.4rem); line-height: .82; font-variant-numeric: tabular-nums lining-nums; text-transform: uppercase; display: block; }
+  .cap { display: block; max-width: 26ch; }
+
+  .bar { position: fixed; z-index: 3; inset: 0 0 auto 0; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: calc(var(--pad) * .55) var(--pad); pointer-events: none; }
+  .bar > * { pointer-events: auto; }
+  .bar button, .hint, .cta, .swatches button { all: unset; cursor: pointer; }
+  /* all: unset возвращает pointer-events к наследованию, а родители для кликов прозрачны: включаем явно */
+  .bar button, .bar a, .labels button, .labels a { pointer-events: auto; }
+  .bar .brand { font-family: var(--display), sans-serif; font-weight: var(--display-weight); letter-spacing: var(--display-track); font-variation-settings: var(--display-settings); font-size: 1.5rem; line-height: 1; text-transform: uppercase; }
+  .bar nav { display: flex; gap: clamp(12px, 2vw, 30px); align-items: baseline; }
+  .bar a { color: inherit; text-decoration: none; }
+  .try { text-decoration: underline; text-underline-offset: 4px; }
+  button:focus-visible { outline: 1px solid currentColor; outline-offset: 4px; }
+  .hint { display: inline-flex; align-items: center; gap: 12px; }
+  .hint::before { content: ""; width: 40px; height: 1px; background: currentColor; }
+
+  .swatches { display: flex; gap: 8px; justify-content: flex-end; margin-bottom: 14px; }
+  .swatches button { width: 28px; height: 28px; background: var(--c); outline: 1px solid color-mix(in srgb, var(--fg) 45%, transparent); }
+  .swatches button[aria-pressed="true"] { outline: 2px solid var(--fg); outline-offset: 3px; }
+  .cta { display: inline-block; margin-top: 14px; background: var(--fg); color: var(--day); padding: 16px 28px 17px; font-weight: 500; transition: background .5s ease, color .5s ease; }
+  body:not([data-light="on"]) .cta { color: var(--night); }
+
+  @media (max-width: 860px), (max-aspect-ratio: 1/1) {
+    .poster { justify-content: flex-start; padding-top: calc(var(--pad) * 4.6); }
+    .poster.low { justify-content: flex-end; padding-bottom: calc(var(--pad) * 9); }
+    .bar nav a { display: none; }
+  }
+</style>
+</head>
+<body data-light="off">
+  <canvas id="scene" aria-label="Трёхмерная лампа. Её можно включить, наклонить, повернуть и настроить теплоту света."></canvas>
+
+  <header class="bar">
+    <button class="brand" id="brand" type="button">Верст</button>
+    <nav>
+      <button class="try" id="fontbtn" type="button">шрифт</button>
+      <span id="brandhint" hidden></span>
+      <a href="#top">Архив</a><a href="#top">Корзина · 0</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section>
+      <div class="poster"><h1 class="fit" data-fit="0.97">Лума</h1></div>
+      <div class="labels">
+        <p class="tl">Выпуск № 07</p>
+        <p class="tr"><span id="state">выключена</span></p>
+        <p class="bl"><button class="hint" id="pull" type="button">потяни за кольцо</button></p>
+        <p class="br"><span class="num">112 / 300</span>осталось</p>
+      </div>
+    </section>
+
+    <section>
+      <div class="poster right"><p class="fit" data-fit="0.5">336</p></div>
+      <div class="labels">
+        <p class="br"><span class="cap">диодов. Панель качается в раме: возьми её и наклони.</span></p>
+      </div>
+    </section>
+
+    <section>
+      <div class="poster low"><p class="fit" data-fit="0.56"><span id="kelvin">2700</span></p></div>
+      <div class="labels">
+        <p class="bl"><span class="cap">кельвинов. Ручка сбоку, цифры видны и на самой лампе.</span></p>
+      </div>
+    </section>
+
+    <section>
+      <div class="poster low"><p class="fit" data-fit="0.4">14 900</p></div>
+      <div class="labels">
+        <p class="tl">Лума, выпуск № 07<br>26 × 17 × 4 см, 1,4 кг<br>АБС-пластик, сталь</p>
+        <p class="bl">
+          <span class="swatches" id="swatches" style="justify-content:flex-start">
+            <button type="button" style="--c:#c2bfb6" data-color="#c2bfb6" data-name="галька" aria-pressed="true" aria-label="Галька"></button>
+            <button type="button" style="--c:#2a2b2e" data-color="#2a2b2e" data-name="графит" aria-pressed="false" aria-label="Графит"></button>
+            <button type="button" style="--c:#e4501b" data-color="#e4501b" data-name="сурик" aria-pressed="false" aria-label="Сурик"></button>
+            <button type="button" style="--c:#2f6b4f" data-color="#2f6b4f" data-name="малахит" aria-pressed="false" aria-label="Малахит"></button>
+          </span>
+          <span id="colorname">галька</span>, рублей<br>
+          <button class="cta" type="button">В корзину</button>
+        </p>
+      </div>
+    </section>
+  </main>
+  <div id="falloff" aria-hidden="true"></div>
+  <div id="poollight" aria-hidden="true"></div>
+
+  <script type="module" src="./main.ts"></script>
+</body>
+</html>

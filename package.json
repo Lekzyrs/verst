@@ -1,0 +1,26 @@
+{
+  "name": "tilda-case",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "check:ui": "impeccable detect src",
+    "check:dead": "knip",
+    "check:dupes": "jscpd src",
+    "check:slop": "npm run check:ui && npm run check:dead && npm run check:dupes"
+  },
+  "devDependencies": {
+    "@types/three": "^0.187.0",
+    "impeccable": "^4.10.0",
+    "jscpd": "^5.4.3",
+    "knip": "^6.46.1",
+    "typescript": "~7.0.2",
+    "vite": "^8.3.6"
+  },
+  "dependencies": {
+    "three": "^0.187.0"
+  }
+}
