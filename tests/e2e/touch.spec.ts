@@ -1,5 +1,5 @@
 import { expect, test, type CDPSession, type Page } from '@playwright/test';
-import { asleep, openScene, point, scale, state, type Pt } from './scene';
+import { asleep, coverWithLink, openScene, point, scale, state, type Pt } from './scene';
 
 // Без подсказки: кольцо ждёт палец на месте.
 test.use({ hasTouch: true, reducedMotion: 'reduce', viewport: { width: 390, height: 844 } });
@@ -55,4 +55,34 @@ test('касание кольца включает лампу', async ({ page })
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: ring.x, y: ring.y }] });
   await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
   await expect.poll(async () => (await state(page)).on).toBe(true);
+});
+
+test('жест пальцем, начатый на ссылке поверх кольца, прокручивает страницу, а лампу не трогает', async ({ page }) => {
+  await openScene(page);
+  await asleep(page);
+  const cdp = await page.context().newCDPSession(page);
+  const ring = await point(page, 'ring');
+  const link = await coverWithLink(page, ring);
+
+  await swipe(page, cdp, ring, 0, -150);
+  await expect.poll(() => scrollY(page), { message: 'жест, начатый на ссылке, прокрутил страницу' }).toBeGreaterThan(60);
+  await asleep(page);
+  expect((await state(page)).on, 'лампа не включилась').toBe(false);
+  expect((await state(page)).travel, 'шнур не вытянут').toBe(0);
+  await link.evaluate((el) => el.remove());
+});
+
+test('касание пальцем ссылки поверх кольца даёт ей клик и лампу не включает', async ({ page }) => {
+  await openScene(page);
+  await asleep(page);
+  const cdp = await page.context().newCDPSession(page);
+  const ring = await point(page, 'ring');
+  const link = await coverWithLink(page, ring);
+
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: ring.x, y: ring.y }] });
+  await cdp.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await expect(link, 'касание ссылки дошло до неё кликом').toHaveAttribute('data-clicks', '1');
+  await asleep(page);
+  expect((await state(page)).on, 'касание ссылки лампу не включило').toBe(false);
+  await link.evaluate((el) => el.remove());
 });

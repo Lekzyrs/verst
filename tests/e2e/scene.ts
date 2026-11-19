@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { open } from './open';
 
 export type Spot = 'ring' | 'knob' | 'head' | number;
@@ -54,4 +54,28 @@ export function collectErrors(page: Page): string[] {
   page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
   page.on('pageerror', (e) => errors.push(String(e)));
   return errors;
+}
+
+/**
+ * Кладёт поверх точки окна ссылку 80×80, как подпись Tilda поверх лампы: в теле страницы, выше холста, ловит события.
+ * Клики считает в data-clicks и никуда не ведёт. Живёт только в открытой вкладке теста.
+ */
+export async function coverWithLink(page: Page, at: Pt): Promise<Locator> {
+  await page.evaluate(({ x, y }) => {
+    const link = document.createElement('a');
+    link.id = 'vs-test-cover';
+    link.href = '#';
+    link.textContent = 'ссылка';
+    link.dataset.clicks = '0';
+    link.style.cssText = `position:absolute;left:${x + window.scrollX - 40}px;top:${y + window.scrollY - 40}px;width:80px;height:80px;z-index:10`;
+    link.addEventListener('click', (e) => {
+      e.preventDefault();
+      link.dataset.clicks = String(Number(link.dataset.clicks) + 1);
+    });
+    document.body.append(link);
+  }, at);
+  const link = page.locator('#vs-test-cover');
+  const onTop = await link.evaluate((el, { x, y }) => document.elementFromPoint(x, y) === el, at);
+  expect(onTop, 'ссылка лежит под указателем поверх всего').toBe(true);
+  return link;
 }

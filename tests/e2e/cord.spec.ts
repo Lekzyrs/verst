@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { LIVE } from './open';
-import { asleep, cursor, DESK, dist, frames, openScene, point, scale, state, type Pt, type Spot } from './scene';
+import { asleep, coverWithLink, cursor, DESK, dist, frames, openScene, point, scale, state, type Pt, type Spot } from './scene';
 
 // Без подсказки шнур висит неподвижно: иначе она качнула бы его посреди проверки.
 test.use({ reducedMotion: 'reduce', viewport: DESK });
@@ -141,16 +141,37 @@ test('кнопка страницы: Enter включает лампу, подп
   await expect(page.locator('html')).toHaveAttribute('data-vs-light', 'off');
 });
 
-test('нажатие на кнопку страницы не хватает лампу', async ({ page }) => {
+test('ссылка страницы поверх кольца получает клик, а лампа под ней не берётся', async ({ page }) => {
   await openScene(page);
   await asleep(page);
-  const box = (await page.locator('.vs-pull').boundingBox())!;
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  expect(await cursor(page)).not.toBe('grab');
+  const ring = await point(page, 'ring');
+  await page.mouse.move(ring.x, ring.y);
+  expect(await cursor(page), 'без ссылки кольцо под курсором берётся').toBe('grab');
+
+  const link = await coverWithLink(page, ring);
+  await page.mouse.move(ring.x + 1, ring.y);
+  expect(await cursor(page), 'курсор над ссылкой не зовёт взять лампу').not.toBe('grab');
+
+  // нажатие и протяжка, которой хватило бы на рывок
   await page.mouse.down();
-  expect(await cursor(page)).not.toBe('grabbing');
+  await frames(page);
+  expect(await cursor(page), 'нажатие на ссылку лампу не берёт').not.toBe('grabbing');
+  await page.mouse.move(ring.x + 1, ring.y + 0.5 * (await scale(page)), { steps: 10 });
+  await frames(page, 8);
+  expect(dist(await point(page, 'ring'), ring), 'кольцо осталось на месте, px').toBeLessThanOrEqual(1);
+  expect((await state(page)).travel, 'шнур не вытянут').toBe(0);
+  expect((await state(page)).on, 'лампа не включилась').toBe(false);
   await page.mouse.up();
-  await expect.poll(async () => (await state(page)).on, { message: 'клик по кнопке включил лампу' }).toBe(true);
+
+  // настоящий клик доходит до ссылки и не считается касанием кольца
+  await link.click();
+  await expect(link).toHaveAttribute('data-clicks', '1');
+  await asleep(page);
+  expect((await state(page)).on, 'клик по ссылке лампу не включил').toBe(false);
+
+  await link.evaluate((el) => el.remove());
+  await page.mouse.move(ring.x, ring.y);
+  expect(await cursor(page), 'без ссылки кольцо снова берётся').toBe('grab');
 });
 
 test('кнопка без адреса получает роль, фокус и клавиши Enter и пробел', async ({ page }) => {
