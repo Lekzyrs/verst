@@ -1,0 +1,67 @@
+/* Стенд повторяет страницу Tilda. Каждый элемент получает position: absolute и z-index: 3 селектором
+   #recN .tn-elem[data-elem-id="..."], как в CSS блока на опубликованной странице (docs/tilda-contract.md, «Слои»):
+   у этого селектора специфичность выше, чем у правила подписей из бандла, поэтому без !important подписи не поднять. */
+
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: color-mix(in srgb, #f2c200 calc(var(--vs-lit, 0) * 100%), #2b2707);
+  color: #f4f1e4;
+  font: 400 15px/1.35 'Sofia Sans', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Основа блока T396: на Tilda её даёт общий CSS Zero Block. overflow: hidden не даёт ?zoom растянуть страницу вбок. */
+.t396__artboard { position: relative; overflow: hidden; }
+.t396__carrier, .t396__filter { position: absolute; left: 0; top: 0; width: 100%; height: 100%; }
+.t396 .tn-atom { font-family: 'Sofia Sans', sans-serif; }
+.t396 a.tn-atom { display: block; color: inherit; text-decoration: none; }
+.t396 a.tn-atom:focus-visible { outline: 1px solid currentColor; outline-offset: 4px; }
+
+/* Первый экран: высота окна. */
+#rec1 .t396__artboard { height: 100vh; }
+
+/* «ЛУМА»: слово шириной 2,528 кегля (Sofia Sans 1000, -0.05em, lang="ru") занимает 97% ширины.
+   Буквы выступают за эту ширину на 0,05 кегля (трекинг после последней), поэтому поля слева и справа
+   выровнены по буквам: left = 50% - (2,528 + 0,05) / 2 кегля. */
+#rec1 .tn-elem[data-elem-id="101"] { z-index: 3; position: absolute; top: calc(50% - 0.38 * 97vw / 2.528); left: calc(50% - 1.289 * 97vw / 2.528); width: 97vw; }
+#rec1 .tn-elem[data-elem-id="101"] .tn-atom { font-size: calc(97vw / 2.528); font-weight: 1000; line-height: .76; letter-spacing: -0.05em; white-space: nowrap; }
+
+/* Метка сцены: прозрачная фигура, события не ловит. */
+#rec1 .tn-elem[data-elem-id="102"] { z-index: 3; position: absolute; top: 0; left: 50%; width: 50%; height: 100%; pointer-events: none; }
+#rec1 .tn-elem[data-elem-id="102"] .tn-atom { width: 100%; height: 100%; }
+
+#rec1 .tn-elem[data-elem-id="103"] { z-index: 3; position: absolute; top: 24px; left: 24px; width: 120px; }
+#rec1 .tn-elem[data-elem-id="103"] .tn-atom { font-size: 24px; font-weight: 1000; line-height: 1; letter-spacing: -0.05em; }
+
+#rec1 .tn-elem[data-elem-id="104"] { z-index: 3; position: absolute; top: 28px; left: calc(100% - 224px); width: 200px; text-align: right; }
+
+#rec1 .tn-elem[data-elem-id="105"] { z-index: 3; position: absolute; top: 50px; left: calc(100% - 224px); width: 200px; text-align: right; }
+#rec1 .tn-elem[data-elem-id="105"] .tn-atom { font-weight: 500; }
+
+#rec1 .tn-elem[data-elem-id="106"] { z-index: 3; position: absolute; top: calc(100% - 72px); left: 24px; width: 220px; height: 48px; }
+#rec1 .tn-elem[data-elem-id="106"] .tn-atom { position: relative; display: flex; align-items: center; justify-content: center; box-sizing: border-box; height: 100%; font-weight: 500; }
+#rec1 .tn-elem[data-elem-id="106"] .tn-atom__button-border { position: absolute; inset: 0; border: 1px solid currentColor; pointer-events: none; }
+
+#rec1 .tn-elem[data-elem-id="107"] { z-index: 3; position: absolute; top: calc(100% - 110px); left: calc(100% - 324px); width: 300px; text-align: right; }
+#rec1 .tn-elem[data-elem-id="107"] .tn-atom { font-size: 56px; font-weight: 1000; line-height: .82; letter-spacing: -0.05em; font-variant-numeric: tabular-nums lining-nums; white-space: nowrap; }
+
+#rec1 .tn-elem[data-elem-id="108"] { z-index: 3; position: absolute; top: calc(100% - 44px); left: calc(100% - 224px); width: 200px; text-align: right; }
+
+/* Узкое окно: слово сверху, метка сцены на нижних 60% экрана. */
+@media screen and (max-width: 639px) {
+  #rec1 .tn-elem[data-elem-id="101"] { top: 88px; }
+  #rec1 .tn-elem[data-elem-id="102"] { top: 40%; left: 0; width: 100%; height: 60%; }
+  #rec1 .tn-elem[data-elem-id="103"] { top: 16px; left: 16px; }
+  #rec1 .tn-elem[data-elem-id="103"] .tn-atom { font-size: 20px; }
+  #rec1 .tn-elem[data-elem-id="104"] { top: 18px; left: calc(100% - 176px); width: 160px; }
+  #rec1 .tn-elem[data-elem-id="105"] { top: 38px; left: calc(100% - 176px); width: 160px; }
+  #rec1 .tn-elem[data-elem-id="106"] { top: calc(100% - 64px); left: 16px; width: 180px; }
+  #rec1 .tn-elem[data-elem-id="107"] { top: calc(100% - 100px); left: calc(100% - 186px); width: 170px; }
+  #rec1 .tn-elem[data-elem-id="107"] .tn-atom { font-size: 36px; }
+  #rec1 .tn-elem[data-elem-id="108"] { top: calc(100% - 40px); left: calc(100% - 156px); width: 140px; }
+}
+
+/* Второй блок: одна строка под первым экраном. */
+#rec2 .t396__artboard { height: 320px; }
+#rec2 .tn-elem[data-elem-id="201"] { z-index: 3; position: absolute; top: 40px; left: 24px; width: calc(100% - 48px); }

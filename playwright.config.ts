@@ -4,7 +4,7 @@ export default defineConfig({
   testDir: 'tests/e2e',
   workers: 1,
   use: {
-    baseURL: process.env.VERST_URL ?? 'http://localhost:5190/dev/',
+    baseURL: process.env.VERST_URL ?? 'http://localhost:5273/dev/',
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
@@ -12,8 +12,8 @@ export default defineConfig({
     { name: 'webkit', use: { ...devices['Desktop Safari'] } },
   ],
   webServer: {
-    command: 'npx vite --port 5190 --strictPort',
-    url: 'http://localhost:5190/@vite/client',
+    command: 'npx vite --port 5273 --strictPort',
+    url: 'http://localhost:5273/@vite/client',
     reuseExistingServer: true,
   },
 });
