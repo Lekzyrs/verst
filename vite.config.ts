@@ -9,6 +9,6 @@ export default defineConfig({
       fileName: () => 'verst.js',
     },
     target: 'es2020',
-    sourcemap: true,
+    sourcemap: 'hidden',
   },
 });
