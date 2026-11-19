@@ -16,7 +16,7 @@ export interface Layers {
   setLight(lit: number, xPx: number, yPx: number): void;
   /** Пятно света 200×200 с центром в начале координат окна; cssMatrix: значение transform, например matrix(a, b, c, d, x, y). null прячет пятно. */
   setPool(cssMatrix: string | null, opacity: number): void;
-  /** cb вызывается при смене размера окна, прокрутке, смене раскладки блока, загрузке страницы и шрифтов. */
+  /** cb вызывается при смене размера окна, прокрутке, смене раскладки блока (размеры, inline-стиль и класс метки и артборда), загрузке страницы и шрифтов. */
   onLayout(cb: () => void): void;
   dispose(): void;
 }
@@ -76,11 +76,20 @@ export function mountLayers(doc: Document): Layers | null {
   const emit = (): void => {
     for (const cb of callbacks) cb();
   };
-  // Tilda расставляет элементы своим скриптом уже после загрузки: размеры метки и артборда следит ResizeObserver.
+  // Tilda расставляет элементы своим скриптом уже после загрузки: размеры метки и артборда следит ResizeObserver,
+  // а сдвиг без смены размера виден только по записи inline-стиля или класса. Такие записи идут пачками,
+  // поэтому вызов по ним один на кадр.
+  const artboard = stage.closest('.t396__artboard');
   const observer = new ResizeObserver(emit);
   observer.observe(stage);
-  const artboard = stage.closest('.t396__artboard');
   if (artboard) observer.observe(artboard);
+  let frame = 0;
+  const mutations = new MutationObserver(() => {
+    if (frame === 0) frame = win.requestAnimationFrame(() => { frame = 0; emit(); });
+  });
+  const watched: MutationObserverInit = { attributes: true, attributeFilter: ['style', 'class'] };
+  mutations.observe(stage, watched);
+  if (artboard) mutations.observe(artboard, watched);
   win.addEventListener('resize', emit);
   win.addEventListener('scroll', emit, { passive: true });
   win.addEventListener('load', emit);
@@ -113,6 +122,8 @@ export function mountLayers(doc: Document): Layers | null {
       disposed = true;
       callbacks.clear();
       observer.disconnect();
+      mutations.disconnect();
+      if (frame !== 0) win.cancelAnimationFrame(frame);
       win.removeEventListener('resize', emit);
       win.removeEventListener('scroll', emit);
       win.removeEventListener('load', emit);

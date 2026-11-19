@@ -131,6 +131,44 @@ test('рамка сцены следует за окном и прокрутко
   expect(scrolled.left).toBeCloseTo(narrow.left, 0);
 });
 
+// Tilda расставляет элементы скриптом, записью inline-стилей: метка может сдвинуться, не меняя размеров.
+for (const zoom of ['', '1.2']) {
+  test(`onLayout срабатывает, когда метка сдвинулась без смены размера${zoom ? `, zoom ${zoom}` : ''}`, async ({ page }) => {
+    test.skip(LIVE && zoom !== '', 'zoom ставит только стенд');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await open(page, zoom ? `?zoom=${zoom}` : '');
+    await page.waitForLoadState('load');
+    const r = await page.evaluate(async () => {
+      const frames = (): Promise<void> => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+      await document.fonts.ready;
+      await frames(); // первые уведомления (ResizeObserver, шрифты) уже прошли
+      const layers = window.__verst!.layers;
+      const marker = document.querySelector<HTMLElement>('.vs-stage')!;
+      const before = layers.stageRect();
+      window.__layouts = 0;
+      layers.onLayout(() => { window.__layouts = (window.__layouts ?? 0) + 1; });
+      const left = parseFloat(getComputedStyle(marker).left);
+      // Три записи подряд, как у скрипта Tilda; итог: left + 40px.
+      for (const dx of [10, 20, 40]) marker.style.left = `${left + dx}px`;
+      await frames();
+      const after = layers.stageRect();
+      return {
+        layouts: window.__layouts,
+        dx: after.left - before.left,
+        dw: after.width - before.width,
+        dh: after.height - before.height,
+        zoom: parseFloat(getComputedStyle(marker).zoom) || 1,
+      };
+    });
+    expect(r.layouts, 'onLayout после сдвига метки').toBeGreaterThan(0);
+    if (!LIVE) expect(r.layouts, 'несколько записей за кадр дают один вызов').toBe(1);
+    if (zoom) expect(r.zoom).toBeCloseTo(Number(zoom), 5);
+    expect(r.dx).toBeCloseTo(40 * r.zoom, 0);
+    expect(r.dw).toBeCloseTo(0, 1);
+    expect(r.dh).toBeCloseTo(0, 1);
+  });
+}
+
 test('setLight пишет переменные', async ({ page }) => {
   await open(page);
   const v = await page.evaluate(() => {
@@ -157,6 +195,7 @@ test('dispose убирает холст, свет, стили и слушате�
     layers.setLight(0.5, 10, 10);
     layers.dispose();
     window.scrollTo(0, 100);
+    document.querySelector<HTMLElement>('.vs-stage')!.style.left = '10px';
     await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
     const label = document.querySelector('.vs-label')!;
     return {
