@@ -19,7 +19,8 @@ const TOLERANCE = 12;
 function overflow(page: Page) {
   return page.evaluate(() => {
     const b = window.__verst!.bounds();
-    const s = window.__verst!.layers.stageRect();
+    // Рамка метки берётся из страницы, а не из слоёв: иначе проверка сверяла бы лампу с тем, по чему сама же кадрирована.
+    const s = document.querySelector('.vs-stage')!.getBoundingClientRect();
     return {
       left: s.left - b.left,
       top: s.top - b.top,
@@ -88,8 +89,9 @@ test('лампа едет вместе со страницей при прокр
   await expectInsideStage(page, 'после прокрутки');
 });
 
-test('лампа остаётся в рамке сцены при любом повороте и наклоне', async ({ page }) => {
-  await page.setViewportSize(SIZES[0]);
+for (const size of SIZES) {
+test(`лампа остаётся в рамке сцены при любом повороте и наклоне, ${sizeName(size)}`, async ({ page }) => {
+  await page.setViewportSize(size);
   await openScene(page);
   await asleep(page);
   const head = await point(page, 'head');
@@ -101,17 +103,18 @@ test('лампа остаётся в рамке сцены при любом п�
     await page.mouse.move(head.x - turn * 131, head.y, { steps: 4 });
     await frames(page, 3);
     expect(Math.abs((await state(page)).spin - spin)).toBeCloseTo(turn * 131 * 0.006, 2);
-    await expectInsideStage(page, `поворот на ${turn * 45}°`);
+    await expectInsideStage(page, `поворот на ${turn * 45}°, ${sizeName(size)}`);
   }
   // вверх и вниз на 300 px от точки нажатия: курсор остаётся в окне
   for (const [dy, pitch] of [[-300, -0.45], [300, 1.3]]) {
     await page.mouse.move(head.x - 8 * 131, head.y + dy, { steps: 8 });
     await frames(page, 3);
     expect((await state(page)).pitch).toBeCloseTo(pitch, 5);
-    await expectInsideStage(page, `наклон ${pitch} рад`);
+    await expectInsideStage(page, `наклон ${pitch} рад, ${sizeName(size)}`);
   }
   await page.mouse.up();
 });
+}
 
 test.describe('плотный экран', () => {
   test.use({ deviceScaleFactor: 2 });

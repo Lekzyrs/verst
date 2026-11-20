@@ -82,7 +82,8 @@ test('свет не прыгает, пока лампу раскручивают
     await page.mouse.up();
   }, SAMPLE_MS);
   const spins = trace.map((s) => s.spin);
-  expect(Math.max(...spins) - Math.min(...spins), 'лампа действительно повернулась').toBeGreaterThan(1.2);
+  expect(Math.min(...spins), 'поворот дошёл влево за −0,3 рад').toBeLessThan(-0.3);
+  expect(Math.max(...spins), 'поворот дошёл вправо за 0,46 рад').toBeGreaterThan(0.46);
   const w = worst(trace);
   expect(w.centre, `центр спада за кадр (${w.at})`).toBeLessThan(MAX_CENTRE_STEP);
   expect(w.pool, `центр пятна за кадр (${w.at})`).toBeLessThan(MAX_CENTRE_STEP);

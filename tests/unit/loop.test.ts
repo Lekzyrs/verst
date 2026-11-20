@@ -123,3 +123,27 @@ test('после dispose wake ничего не запрашивает', () => {
   expect(queue.length).toBe(0);
   expect(loop.awake).toBe(false);
 });
+
+test('первый кадр после пробуждения идёт с dt 1/60, а не с временем сна', () => {
+  const loop = make(() => false);
+  for (let i = 0; i < 100; i++) tick();
+  expect(loop.awake).toBe(false);
+  dts = [];
+  now += 60_000; // сцена проспала минуту
+  loop.wake();
+  tick();
+  expect(dts).toHaveLength(1);
+  expect(dts[0]).toBeCloseTo(1 / 60, 6);
+  tick(16);
+  expect(dts[1]).toBeCloseTo(0.016, 6); // дальше dt считается по часам
+});
+
+test('wake у бодрствующего цикла возвращает бюджет тихих кадров: 20 тихих, wake, ещё 24', () => {
+  const loop = make(() => false);
+  for (let i = 0; i < 20; i++) tick();
+  expect(draws).toBe(20);
+  loop.wake();
+  for (let i = 0; i < 100; i++) tick();
+  expect(draws).toBe(44);
+  expect(loop.awake).toBe(false);
+});

@@ -1,3 +1,4 @@
 {
-  "ignore": ["spike/**", "petit/**"]
+  "entry": ["dev/stand.ts"],
+  "ignore": ["spike/**"]
 }

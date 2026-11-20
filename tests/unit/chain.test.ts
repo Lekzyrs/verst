@@ -20,3 +20,4 @@ test('после отпускания шнур уходит в корпус', ()
 test('tug щёлкает один раз и возвращается', () => { run(2); c.tug(); expect(run(0.6)).toBe(1); expect(c.travel).toBeLessThan(0.01); });
 test('после качка засыпает за 10 секунд', () => { run(2); c.grab(13); c.moveHeld({ x: 0.6, y: end().y, z: 0 }); run(0.3); c.release(); run(10); expect(c.maxSpeed()).toBeLessThan(5e-6); });
 test('keepOut получает запас 0.11 для кольца и 0.03 для звеньев', () => { const seen = new Set<number>(); run(0.2, A, (_p, m) => { seen.add(m); }); expect([...seen].sort()).toEqual([0.03, 0.11]); });
+test('после tug и 3 секунд шнур неподвижен: скорость и ход меньше 1e-4', () => { run(2); c.tug(); run(3); expect(c.maxSpeed()).toBeLessThan(1e-4); expect(c.travel).toBeLessThan(1e-4); });

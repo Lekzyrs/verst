@@ -40,7 +40,6 @@ const legacy: Impl = (origin, dir, level, camera, width, height) => {
 
 const current: Impl = (origin, dir, level, camera, width, height) =>
   pageLight({ origin, dir, level, width, height, project: (point, out) => toPixels(point, camera, width, height, out) });
-const impl: Impl = current;
 
 const model = buildLamp();
 const WINDOWS = {
@@ -66,13 +65,13 @@ const FADED = 0.02;
 const STEP_SHAPE = 0.9;
 
 /** Обходит сетку и собирает нарушения непрерывности между соседними узлами. */
-function violations(win: (typeof WINDOWS)[keyof typeof WINDOWS], run: Impl): string[] {
+function violations(win: (typeof WINDOWS)[keyof typeof WINDOWS], run: Impl, level = 1): string[] {
   const camera = new THREE.PerspectiveCamera();
   frameCamera(camera, win.w, win.h, win.stage, model);
   const bad: string[] = [];
   const at = (spin: number, pitch: number): Result => {
     const { origin, dir } = beam(spin, pitch);
-    const r = run(origin, dir, 1, camera, win.w, win.h);
+    const r = run(origin, dir, level, camera, win.w, win.h);
     const room = 0.3 * Math.max(win.w, win.h) + 1; // мягкий предел: центр спада недалеко от окна
     if (r.centre.x < -room || r.centre.x > win.w + room || r.centre.y < -room || r.centre.y > win.h + room) {
       bad.push(`поворот ${spin.toFixed(2)}, наклон ${pitch.toFixed(2)}: центр спада далеко за окном (${r.centre.x.toFixed(0)}, ${r.centre.y.toFixed(0)})`);
@@ -127,8 +126,21 @@ function violations(win: (typeof WINDOWS)[keyof typeof WINDOWS], run: Impl): str
 describe('свет лампы на странице непрерывен', () => {
   for (const [name, win] of Object.entries(WINDOWS)) {
     test(name, () => {
-      const bad = violations(win, impl);
+      const bad = violations(win, current);
       expect(bad.length, `нарушений ${bad.length}, первые:\n${bad.slice(0, 8).join('\n')}`).toBe(0);
+    });
+    test(`${name}: на уровне 0,1 тоже`, () => {
+      const bad = violations(win, current, 0.1);
+      expect(bad.length, `нарушений ${bad.length}, первые:\n${bad.slice(0, 8).join('\n')}`).toBe(0);
+    });
+  }
+});
+
+// Обход должен уметь находить прыжки: прежняя логика из view.ts на нём обязана ронять проверку в каждом окне.
+describe('проверка непрерывности ловит прежнюю логику', () => {
+  for (const [name, win] of Object.entries(WINDOWS)) {
+    test(name, () => {
+      expect(violations(win, legacy).length).toBeGreaterThan(0);
     });
   }
 });
