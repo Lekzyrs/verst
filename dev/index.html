@@ -7,9 +7,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Стенд: выпуск № 07</title>
 <link rel="icon" href="data:,">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sofia+Sans:wght@1..1000&display=swap">
 <link rel="stylesheet" href="./dev.css">
 </head>
 <body class="t-body">
@@ -25,7 +22,7 @@
         <div class="t396__elem tn-elem vs-stage tn-elem__1102" data-elem-id="102" data-elem-type="shape">
           <div class="tn-atom"></div>
         </div>
-        <div class="t396__elem tn-elem vs-label tn-elem__1103" data-elem-id="103" data-elem-type="text">
+        <div class="t396__elem tn-elem vs-label vs-brand tn-elem__1103" data-elem-id="103" data-elem-type="text">
           <a class="tn-atom" href="/" data-click="brand">Верст</a>
         </div>
         <div class="t396__elem tn-elem vs-label tn-elem__1104" data-elem-id="104" data-elem-type="text">
@@ -54,7 +51,7 @@
       <div class="t396__artboard rendered" data-artboard-recid="2">
         <div class="t396__carrier" data-artboard-recid="2"></div>
         <div class="t396__filter" data-artboard-recid="2"></div>
-        <div class="t396__elem tn-elem tn-elem__2201" data-elem-id="201" data-elem-type="text">
+        <div class="t396__elem tn-elem vs-label tn-elem__2201" data-elem-id="201" data-elem-type="text">
           <div class="tn-atom" field="tn_text_201">Верст, выдуманная мастерская. Сайт-концепт: заказы не принимаются.</div>
         </div>
       </div>
@@ -62,22 +59,22 @@
   </div>
 </div>
 <script>
-  // Крючки стенда для тестов. Работают до запуска boot: модульный скрипт ниже исполняется после этого.
-  // ?nostage=1 убирает метку сцены, ?nolang=1 убирает lang у html (как на опубликованной Tilda),
+  // Крючки стенда для тестов. Работают до запуска boot: модули ниже (голова страницы и бандл) исполняются после этого.
+  // ?nostage=1 убирает метку сцены, ?nolang=1 убирает lang у html после скрипта головы (так проверяется, что бандл ставит ru сам; делает dev/stand.ts),
   // ?zoom=1.2 ставит CSS zoom каждой обёртке .t396__elem (так Tilda масштабирует блок под окно),
   // ?nohref=1 убирает адрес у кнопки «потяни за кольцо»: такой узел сам фокус не получает.
   // window.__clicks считает настоящие клики по каждой ссылке и кнопке (ключ: data-click) и не даёт уйти со стенда.
   (() => {
     const q = new URLSearchParams(location.search);
     if (q.get('nostage') === '1') document.querySelectorAll('.vs-stage').forEach((el) => el.remove());
-    if (q.get('nolang') === '1') document.documentElement.removeAttribute('lang');
     if (q.get('nohref') === '1') document.querySelectorAll('.vs-pull a').forEach((el) => el.removeAttribute('href'));
     const zoom = q.get('zoom');
     if (zoom) document.querySelectorAll('.t396__elem').forEach((el) => el.style.setProperty('zoom', zoom));
     const clicks = (window.__clicks = {});
     document.querySelectorAll('a, button').forEach((el) => {
       el.addEventListener('click', (e) => {
-        e.preventDefault();
+        // Кнопка внутри .vs-pull сама не даёт перехода: это делает бандл (проверка «кнопка не уводит со страницы» настоящая).
+        if (!el.closest('.vs-pull')) e.preventDefault();
         if (!e.isTrusted) return;
         const id = el.dataset.click;
         clicks[id] = (clicks[id] || 0) + 1;
@@ -85,6 +82,7 @@
     });
   })();
 </script>
+<script type="module" src="./stand.ts"></script>
 <script type="module" src="/src/index.ts"></script>
 </body>
 </html>

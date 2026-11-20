@@ -5,7 +5,8 @@ import { join, resolve } from 'node:path';
 import { afterAll, describe, expect, test } from 'vitest';
 
 // Голова страницы Tilda живёт в tilda/head.template.html с двумя метками. Тест подставляет значения, записанные при последней выкладке
-// (tests/unit/fixtures), и требует точно ту голову, что стоит на странице.
+// (tests/unit/fixtures), и требует голову посимвольно, как она записана. Запись совпадает с опубликованной 20.11.2026 кроме одного числа:
+// переход цвета текста сужен с 0,05 до 0,01 света (множитель 20 заменён на 100), иначе при свете 0,56–0,59 контраст падал до 1,3 (tests/e2e/page.spec.ts).
 const ROOT = resolve(import.meta.dirname, '../..');
 const fixture = (name: string): string => readFileSync(join(ROOT, 'tests/unit/fixtures', name), 'utf8');
 const template = readFileSync(join(ROOT, 'tilda/head.template.html'), 'utf8');
