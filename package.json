@@ -14,7 +14,8 @@
     "check:dead": "knip",
     "check:dupes": "jscpd src",
     "check:slop": "npm run check:ui && npm run check:dead && npm run check:dupes",
-    "check": "npm test && npm run build && npm run check:slop"
+    "check": "npm test && npm run build && npm run check:slop",
+    "deploy": "bash scripts/deploy.sh"
   },
   "devDependencies": {
     "@playwright/test": "^1.64.0",
