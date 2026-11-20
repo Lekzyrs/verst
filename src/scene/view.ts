@@ -60,29 +60,46 @@ function bindPage(doc: Document, toggle: () => void): { show(on: boolean): void;
     e.preventDefault(); // кнопка на Tilda — ссылка: перехода по ней быть не должно
     toggle();
   };
+  const isActivation = (e: KeyboardEvent): boolean => e.key === 'Enter' || e.key === ' ';
+  // Повтор клавиши (e.repeat) лампу не переключает и рывок шнура не перезапускает: у ссылки и кнопки повтор сам даёт клик,
+  // его гасит preventDefault; у узла без адреса нажатие обрабатываем мы.
   const key = (e: KeyboardEvent): void => {
-    if (e.key === 'Enter' || e.key === ' ') press(e);
+    if (!isActivation(e)) return;
+    if (e.repeat) e.preventDefault();
+    else if (needsKeys) press(e);
   };
   pull?.addEventListener('click', press);
-  if (control && needsKeys) {
-    control.setAttribute('role', 'button');
-    control.tabIndex = 0;
+  if (control) {
     control.addEventListener('keydown', key);
+    if (needsKeys) {
+      control.setAttribute('role', 'button');
+      control.tabIndex = 0;
+    }
   }
+  // Подпись читается программой чтения с экрана, когда меняется состояние лампы, а не теплота света.
+  label?.setAttribute('aria-live', 'polite');
+  let shown: boolean | null = null;
 
   return {
     show(on) {
+      if (on === shown) return; // ручка теплоты тоже зовёт отсюда: подпись переписывается только при смене состояния
+      shown = on;
       root.dataset.vsLight = on ? 'on' : 'off';
       if (label) label.textContent = on ? STATE_TEXT.on : STATE_TEXT.off;
     },
     dispose() {
       delete root.dataset.vsLight;
-      if (label) label.textContent = labelBefore;
+      if (label) {
+        label.textContent = labelBefore;
+        label.removeAttribute('aria-live');
+      }
       pull?.removeEventListener('click', press);
-      if (control && needsKeys) {
-        control.removeAttribute('role');
-        control.removeAttribute('tabindex');
+      if (control) {
         control.removeEventListener('keydown', key);
+        if (needsKeys) {
+          control.removeAttribute('role');
+          control.removeAttribute('tabindex');
+        }
       }
     },
   };

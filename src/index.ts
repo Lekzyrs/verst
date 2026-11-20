@@ -1,3 +1,4 @@
+import { CANVAS_ID } from './page/contract';
 import { mountLayers } from './page/layers';
 import { mountView, type VerstDebug } from './scene/view';
 
@@ -16,7 +17,8 @@ let booted = false;
  * Вызывается сам после DOMContentLoaded, если есть document.
  */
 export function boot(): void {
-  if (booted) return;
+  // Второй экземпляр скрипта (тег вставлен дважды) ничего не делает: его модульный флаг booted свой, а холст общий.
+  if (booted || document.getElementById(CANVAS_ID)) return;
   booted = true;
   const root = document.documentElement;
   // На опубликованной Tilda у html нет lang, а без ru Sofia Sans рисует болгарскую «Л». Страница ставит lang и сама, раньше.

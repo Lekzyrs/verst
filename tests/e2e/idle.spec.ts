@@ -60,6 +60,26 @@ test.describe('меньше движения', () => {
   });
 });
 
+test.describe('рука держит панель', () => {
+  test.use({ reducedMotion: 'reduce' });
+
+  test('неподвижная рука кадры не рисует, движение их возвращает', async ({ page }) => {
+    await openScene(page);
+    await asleep(page);
+    const head = await point(page, 'head');
+    await page.mouse.move(head.x, head.y);
+    await page.mouse.down();
+    await page.waitForTimeout(1000); // запас: стоп-кадры после нажатия и окно неподвижности
+    const before = await drawn(page);
+    await page.waitForTimeout(3000);
+    expect(await drawn(page), 'кадров за 3 с, пока рука держит панель неподвижно').toBe(before);
+    await page.mouse.move(head.x + 30, head.y + 10, { steps: 5 });
+    await expect.poll(() => drawn(page), { message: 'движение руки вернуло кадры' }).toBeGreaterThan(before);
+    await page.mouse.up();
+    await asleep(page);
+  });
+});
+
 test('подсказка: шнур качается раз в 6 с, три раза, и сцена замирает', async ({ page }) => {
   test.setTimeout(60_000);
   await openScene(page);

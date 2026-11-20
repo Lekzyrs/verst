@@ -1,9 +1,18 @@
 import { expect, test, type Page } from '@playwright/test';
 import { LIVE } from './open';
-import { asleep, coverWithLink, cursor, DESK, dist, frames, openScene, point, scale, state, type Pt, type Spot } from './scene';
+import { asleep, coverWithLink, cursor, DESK, dist, frames, openScene, point, scale, state, switchOn, type Pt, type Spot } from './scene';
 
 // Без подсказки шнур висит неподвижно: иначе она качнула бы его посреди проверки.
 test.use({ reducedMotion: 'reduce', viewport: DESK });
+
+declare global {
+  interface Window {
+    /** Стенд: сколько настоящих кликов получила каждая ссылка и кнопка (ключ: data-click). */
+    __clicks?: Record<string, number>;
+    /** Тест: сколько записей в подписи состояния увидел MutationObserver. */
+    __stateWrites?: number;
+  }
+}
 
 const ringInfo = (page: Page) => page.evaluate(() => window.__verst!.ring());
 
@@ -188,4 +197,75 @@ test('кнопка без адреса получает роль, фокус и 
   expect(await page.evaluate(() => window.scrollY), 'пробел не прокрутил страницу').toBe(scrollY);
   await page.keyboard.press('Enter');
   await expect.poll(async () => (await state(page)).on, { message: 'Enter выключил лампу' }).toBe(false);
+});
+
+test('удержанный Enter на кнопке страницы переключает лампу один раз', async ({ page }) => {
+  await openScene(page);
+  await page.locator('.vs-pull a, .vs-pull button').first().focus();
+  await page.keyboard.down('Enter');
+  for (let i = 0; i < 3; i += 1) await page.keyboard.down('Enter'); // четыре нажатия подряд: чётное число переключений вернуло бы лампу назад // повторы: у них repeat = true
+  await page.keyboard.up('Enter');
+  await expect.poll(async () => (await state(page)).on, { message: 'лампа включилась' }).toBe(true);
+  await asleep(page);
+  expect((await state(page)).on, 'повторы Enter лампу не выключили').toBe(true);
+  if (!LIVE) expect(await page.evaluate(() => window.__clicks?.pull), 'клик по кнопке один').toBe(1);
+});
+
+test('удержанный Enter на кнопке без адреса переключает лампу один раз', async ({ page }) => {
+  test.skip(LIVE, 'адрес у кнопки убирает только стенд');
+  await openScene(page, '?nohref=1');
+  await page.evaluate(() => {
+    window.__stateWrites = 0;
+    new MutationObserver((records) => { window.__stateWrites! += records.length; }).observe(document.querySelector('.vs-state')!, { childList: true, characterData: true, subtree: true });
+  });
+  await page.locator('.vs-pull a').focus();
+  await page.keyboard.down('Enter');
+  for (let i = 0; i < 3; i += 1) {
+    await page.waitForTimeout(700); // дольше рывка шнура: каждое переключение успевает дойти до подписи
+    await page.keyboard.down('Enter'); // повтор: у него repeat = true
+  }
+  await page.keyboard.up('Enter');
+  await expect.poll(async () => (await state(page)).on, { message: 'лампа включилась' }).toBe(true);
+  await asleep(page);
+  expect(await page.evaluate(() => window.__stateWrites), 'подпись переписана один раз: лампа переключена один раз').toBe(1);
+});
+
+test('подпись состояния: ручка её не переписывает, переключение переписывает; у подписи aria-live', async ({ page }) => {
+  await openScene(page);
+  await switchOn(page);
+  await asleep(page);
+  await expect(page.locator('.vs-state .tn-atom')).toHaveAttribute('aria-live', 'polite');
+  await page.evaluate(() => {
+    const target = document.querySelector('.vs-state')!;
+    window.__stateWrites = 0;
+    new MutationObserver((records) => { window.__stateWrites! += records.length; }).observe(target, { childList: true, characterData: true, subtree: true });
+  });
+  const knob = await point(page, 'knob');
+  await page.mouse.move(knob.x, knob.y);
+  await page.mouse.down();
+  await page.mouse.move(knob.x + 80, knob.y, { steps: 10 });
+  await frames(page);
+  await page.mouse.up();
+  expect((await state(page)).kelvin, 'ручка повернулась').not.toBe(3000);
+  expect(await page.evaluate(() => window.__stateWrites), 'подпись не переписана, пока крутили ручку').toBe(0);
+  await page.locator('.vs-pull').click();
+  await expect.poll(async () => (await state(page)).on).toBe(false);
+  await expect.poll(() => page.evaluate(() => window.__stateWrites), { message: 'переключение переписало подпись' }).toBeGreaterThan(0);
+});
+
+test('Tab проходит по странице: каждая видимая ссылка и кнопка получает фокус', async ({ page }) => {
+  await openScene(page);
+  const wanted = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>('a[href], button')]
+      .filter((el) => { const r = el.getBoundingClientRect(); const s = getComputedStyle(el); return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; })
+      .map((el) => (el.textContent ?? '').trim().replace(/\s+/g, ' ')),
+  );
+  expect(wanted.length, 'на странице есть ссылки и кнопки').toBeGreaterThan(0);
+  const reached = new Set<string>();
+  for (let i = 0; i < wanted.length + 12; i += 1) {
+    await page.keyboard.press('Tab');
+    const text = await page.evaluate(() => (document.activeElement?.textContent ?? '').trim().replace(/\s+/g, ' '));
+    reached.add(text);
+  }
+  for (const text of wanted) expect([...reached], `фокус дошёл до «${text}»`).toContain(text);
 });

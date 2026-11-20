@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { LIVE } from './open';
-import { asleep, DESK, openScene } from './scene';
+import { asleep, collectErrors, DESK, openScene } from './scene';
 
 // Голова страницы Tilda (tilda/head.template.html): цвет текста за светом лампы (L2), viewport-fit=cover (P1),
 // тег бандла с integrity и crossorigin, шрифт страницы. На стенде голова та же, на живой странице это опубликованная голова.
@@ -113,4 +113,29 @@ test.describe('опубликованная голова', () => {
     expect(content.length).toBeGreaterThan(0);
     for (const c of content) expect(c).toContain('viewport-fit=cover');
   });
+});
+
+test('второе подключение скрипта ничего не меняет: один холст, ошибок нет', async ({ page }) => {
+  const errors = collectErrors(page);
+  await openScene(page);
+  await asleep(page);
+  // Стенд подключает исходник заново под другим адресом (отдельный экземпляр модуля), живая страница получает копию тега бандла.
+  await page.evaluate(async (live) => {
+    if (live) {
+      const first = document.querySelector<HTMLScriptElement>('script[src*="/verst/assets/verst-"]')!;
+      const again = document.createElement('script');
+      again.src = first.src;
+      again.integrity = first.integrity;
+      again.crossOrigin = first.crossOrigin;
+      await new Promise((done) => { again.onload = again.onerror = done; document.head.append(again); });
+    } else {
+      const second = '/src/index.ts?second';
+      await import(/* @vite-ignore */ second);
+    }
+  }, LIVE);
+  await page.waitForTimeout(300);
+  expect(await page.locator('#vs-canvas').count(), 'холст один').toBe(1);
+  expect(await page.locator('#vs-falloff, #vs-pool').count(), 'слоёв света по одному').toBe(2);
+  expect(await page.locator('style#vs-layers').count()).toBe(1);
+  expect(errors).toEqual([]);
 });

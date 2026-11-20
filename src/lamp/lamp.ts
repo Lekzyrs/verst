@@ -145,6 +145,7 @@ export class Lamp {
 
   grab(grip: Grip, xPx: number, yPx: number, camera: THREE.Camera): void {
     this.grip = grip;
+    this.draggedAt = performance.now();
     if (grip.kind === 'head') {
       this.turnSpeed = 0;
       this.pitchSpeed = 0;
@@ -398,7 +399,8 @@ export class Lamp {
   /** Досылает замершие пружины в цель и отвечает, движется ли ещё что-нибудь. */
   private settle(): boolean {
     const target = this.lit ? 1 : 0;
-    let moving = this.grip !== null || this.fill !== target || this.digitsLeft > 0;
+    // Рука считается движущейся, пока она двигалась не раньше STILL_MS назад: неподвижная рука кадры не требует.
+    let moving = (this.grip !== null && performance.now() - this.draggedAt < STILL_MS) || this.fill !== target || this.digitsLeft > 0;
     if (Math.abs(target - this.power) > REST || Math.abs(this.powerSpeed) > REST_SPEED) moving = true;
     else {
       this.power = target;
