@@ -1,6 +1,6 @@
 // Геометрия и материалы лампы (порт спайка). Единицы сцены: 1 = 10 см, лампа стоит в начале координат, стол в y = 0.
 // Без поведения: позой, цветом точек и свечением занимается код выше. Работает в Node без DOM: текстуры на canvas
-// создаются только при наличии document, иначе материал остаётся без карты.
+// создаются, только когда есть document, иначе материал остаётся без карты.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { FONT_FAMILY as FONT } from '../page/contract';

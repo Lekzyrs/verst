@@ -222,7 +222,7 @@ fetch_remote_manifest() {
   on_server "sudo -n sh -c 'test -d $DEST || exit 3; cd $DEST && find . -type f -print0 | sort -z | xargs -0 -r sha256sum'" \
     > "$tmp/remote.sha256" || rc=$?
   if [ "$rc" = 3 ]; then
-    die "на сервере нет $DEST: нужна разовая настройка сервера (docs/deploy-notes.md, «Применение»)"
+    die "на сервере нет $DEST: нужна разовая настройка сервера"
   fi
   [ "$rc" = 0 ] || die "не удалось снять манифест с сервера (код $rc)"
   # Строка манифеста: "<sha256>  ./<путь>", без обратных слешей и управляющих символов.

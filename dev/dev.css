@@ -1,5 +1,5 @@
 /* Стенд повторяет страницу Tilda. Каждый элемент получает position: absolute и z-index: 3 селектором
-   #recN .tn-elem[data-elem-id="..."], как в CSS блока на опубликованной странице (docs/tilda-contract.md, «Слои»):
+   #recN .tn-elem[data-elem-id="..."], как в CSS блока на опубликованной странице:
    у этого селектора специфичность выше, чем у правила подписей из бандла, поэтому без !important подписи не поднять. */
 
 html { -webkit-text-size-adjust: 100%; }
