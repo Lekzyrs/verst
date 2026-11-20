@@ -133,16 +133,6 @@ describe('свет лампы на странице непрерывен', () =>
   }
 });
 
-test('печатает дефолтную позу', () => {
-  (globalThis as any).DBG = true;
-  for (const [name, win] of Object.entries(WINDOWS)) {
-    const camera = new THREE.PerspectiveCamera();
-    frameCamera(camera, win.w, win.h, win.stage, model);
-    const { origin, dir } = beam(-0.55, 0.5);
-    console.log(name, 'dir.y', dir.y.toFixed(3), 'LEG', JSON.stringify(legacy(origin, dir, 1, camera, win.w, win.h)), 'NEW', JSON.stringify(current(origin, dir, 1, camera, win.w, win.h)));
-  }
-});
-
 describe('поза по умолчанию выглядит как раньше', () => {
   for (const [name, win] of Object.entries(WINDOWS)) {
     test(name, () => {
