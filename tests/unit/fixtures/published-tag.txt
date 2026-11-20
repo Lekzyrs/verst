@@ -1,0 +1,1 @@
+<script src="https://lekzyrs.com/verst/assets/verst-3109463a43.js" integrity="sha384-mR+SOlR4/bo9V0SPiczalAjv18kb0bQu8+kkDLV9x8StG7t7eN2yq70GQmku3XxT" crossorigin="anonymous" defer></script>
