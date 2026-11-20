@@ -253,7 +253,9 @@ test('подпись состояния: ручка её не переписыв
   await expect.poll(() => page.evaluate(() => window.__stateWrites), { message: 'переключение переписало подпись' }).toBeGreaterThan(0);
 });
 
-test('Tab проходит по странице: каждая видимая ссылка и кнопка получает фокус', async ({ page }) => {
+test('Tab проходит по странице: каждая видимая ссылка и кнопка получает фокус', async ({ page, browserName }) => {
+  // Safari по умолчанию ходит Tab только по полям ввода; ссылки и кнопки берёт Option+Tab.
+  const tab = browserName === 'webkit' && process.platform === 'darwin' ? 'Alt+Tab' : 'Tab';
   await openScene(page);
   const wanted = await page.evaluate(() =>
     [...document.querySelectorAll<HTMLElement>('a[href], button')]
@@ -263,7 +265,7 @@ test('Tab проходит по странице: каждая видимая с
   expect(wanted.length, 'на странице есть ссылки и кнопки').toBeGreaterThan(0);
   const reached = new Set<string>();
   for (let i = 0; i < wanted.length + 12; i += 1) {
-    await page.keyboard.press('Tab');
+    await page.keyboard.press(tab);
     const text = await page.evaluate(() => (document.activeElement?.textContent ?? '').trim().replace(/\s+/g, ' '));
     reached.add(text);
   }

@@ -96,18 +96,26 @@ test(`лампа остаётся в рамке сцены при любом п�
   await asleep(page);
   const head = await point(page, 'head');
   const spin = (await state(page)).spin;
+  // Полный оборот шире узкого окна, а Firefox и WebKit не передают странице мышь за краем окна. Поэтому нажатие настоящее,
+  // а движение рука передаёт тем же событием pointermove, что и мышь, но с любыми координатами.
+  await page.evaluate(() => addEventListener('pointerdown', (e) => { (window as unknown as { __pid: number }).__pid = e.pointerId; }, { capture: true, once: true }));
   await page.mouse.move(head.x, head.y);
   await page.mouse.down();
+  const moveTo = async (x: number, y: number): Promise<void> => {
+    await page.evaluate(({ x, y }) => {
+      window.dispatchEvent(new PointerEvent('pointermove', { pointerId: (window as unknown as { __pid: number }).__pid, pointerType: 'mouse', isPrimary: true, buttons: 1, clientX: x, clientY: y, bubbles: true }));
+    }, { x, y });
+  };
   // Полный оборот по 45°: 0,006 рад на пиксель, 131 px на шаг. Рука не отпускает панель, чтобы не добавлять инерцию.
   for (let turn = 1; turn <= 8; turn += 1) {
-    await page.mouse.move(head.x - turn * 131, head.y, { steps: 4 });
+    for (let k = 1; k <= 4; k += 1) await moveTo(head.x - (turn - 1) * 131 - (k * 131) / 4, head.y);
     await frames(page, 3);
     expect(Math.abs((await state(page)).spin - spin)).toBeCloseTo(turn * 131 * 0.006, 2);
     await expectInsideStage(page, `поворот на ${turn * 45}°, ${sizeName(size)}`);
   }
-  // вверх и вниз на 300 px от точки нажатия: курсор остаётся в окне
+  // вверх и вниз на 300 px от точки нажатия
   for (const [dy, pitch] of [[-300, -0.45], [300, 1.3]]) {
-    await page.mouse.move(head.x - 8 * 131, head.y + dy, { steps: 8 });
+    for (let k = 1; k <= 8; k += 1) await moveTo(head.x - 8 * 131, head.y + (dy * k) / 8);
     await frames(page, 3);
     expect((await state(page)).pitch).toBeCloseTo(pitch, 5);
     await expectInsideStage(page, `наклон ${pitch} рад, ${sizeName(size)}`);
