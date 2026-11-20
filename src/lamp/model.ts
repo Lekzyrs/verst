@@ -3,6 +3,7 @@
 // создаются только при наличии document, иначе материал остаётся без карты.
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { FONT_FAMILY as FONT } from '../page/contract';
 import { COLS, ROWS } from './matrix';
 
 export interface LampModel {
@@ -18,14 +19,17 @@ export interface LampModel {
 }
 
 const HAS_DOM = typeof document !== 'undefined';
-const FONT = '"Sofia Sans"';
 const DEFAULT_BRAND = 'Верст';
 
 function canvasOf(w: number, h: number): { c: HTMLCanvasElement; ctx: CanvasRenderingContext2D } {
   const c = document.createElement('canvas');
   c.width = w;
   c.height = h;
-  return { c, ctx: c.getContext('2d')! };
+  // Без lang Sofia Sans подставляет болгарские формы букв («Л» в слове «ЛУМА» и в шильдике).
+  c.lang = 'ru';
+  const ctx = c.getContext('2d')!;
+  if ('lang' in ctx) (ctx as CanvasRenderingContext2D & { lang: string }).lang = 'ru';
+  return { c, ctx };
 }
 
 /** Мягкое круглое пятно для ореола панели. */

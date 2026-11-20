@@ -4,6 +4,8 @@
 export const SEL = { stage: '.vs-stage', poster: '.vs-poster', label: '.vs-label', pull: '.vs-pull', state: '.vs-state' } as const;
 export const VARS = { lit: '--vs-lit', lightX: '--vs-lx', lightY: '--vs-ly' } as const;
 export const CANVAS_ID = 'vs-canvas';
+/** Семейство шрифта страницы: его определяет @font-face в head (tilda/head.template.html). Холст рисует шильдик тем же именем. */
+export const FONT_FAMILY = '"Sofia Sans VF"';
 
 /** Узел с текстом внутри элемента Tilda: подпись кнопки, иначе .tn-atom; если внутри нет ни того ни другого, сам элемент. */
 export function atom(el: Element): HTMLElement {
