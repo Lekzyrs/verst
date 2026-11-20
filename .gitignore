@@ -37,3 +37,13 @@ test-results/
 playwright-report/
 .impeccable/hook.cache.json
 .claude/settings.local.json
+
+# локальные файлы ассистента и его инструментов
+CLAUDE.md
+.claude/
+.impeccable/
+
+# рабочие заметки и отвергнутые прототипы: только на диске
+docs/
+spike/lamp/
+spike/lamp-b/
