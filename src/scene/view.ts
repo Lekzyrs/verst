@@ -1,7 +1,6 @@
 // Сцена первого экрана: рендерер, камера по рамке метки, свет лампы на странице, цикл кадров и связь со страницей.
 // Вызывается только в браузере.
 import * as THREE from 'three';
-import { frameToRect } from '../core/frame';
 import { createLoop } from '../core/loop';
 import { pixelRatioFor } from '../core/pixelBudget';
 import { watchPointer } from '../core/pointer';
@@ -9,6 +8,8 @@ import { Lamp, toPixels, type Grip, type LampState, type Spot } from '../lamp/la
 import { buildLamp } from '../lamp/model';
 import { atom, SEL } from '../page/contract';
 import type { Layers } from '../page/layers';
+import { FOV, frameCamera } from './camera';
+import { pageLight } from './pageLight';
 import { buildStudio } from './studio';
 
 /** Отладочные крючки для тестов: window.__verst. Координаты в CSS-пикселях окна. */
@@ -25,14 +26,6 @@ export interface VerstDebug {
   ring(): { aboveFloor: number; insidePanel: boolean };
 }
 
-const FOV = 28;
-const VIEW_FROM = new THREE.Vector3(0.3, 1.0, 14.6).normalize(); // откуда камера смотрит на центр лампы
-// Какую долю меньшей стороны рамки занимает шар, в который вписана лампа. Больше единицы, потому что шар модели взят с запасом:
-// по углам габаритной коробки и на поворот вокруг любой оси, а лампа вращается только вокруг вертикали и в полтора раза уже него.
-// При 1.17 она на любом повороте занимает около 80 % меньшей стороны рамки, как в прототипе.
-const FILL = 1.17;
-const DEPTH_BEFORE = 12; // сколько сцены перед лампой и за ней попадает в кадр: тени на столе длиннее самой лампы
-const DEPTH_BEHIND = 40;
 const HINT_EVERY = 6000; // мс
 const HINT_TIMES = 3;
 const BRAND = 'Верст';
@@ -110,7 +103,6 @@ export function mountView(layers: Layers, onStop: () => void): VerstDebug | null
   const studio = buildStudio(renderer, model);
   const lamp = new Lamp(model, studio);
   const camera = new THREE.PerspectiveCamera(FOV, 1, 0.1, 200);
-  const tanHalf = Math.tan(THREE.MathUtils.degToRad(FOV) / 2);
 
   let width = 0;
   let height = 0;
@@ -123,11 +115,7 @@ export function mountView(layers: Layers, onStop: () => void): VerstDebug | null
   let holding = false;
 
   const p = new THREE.Vector3();
-  const centre = new THREE.Vector3();
-  const along = new THREE.Vector3();
   const sc = new THREE.Vector2();
-  const sa = new THREE.Vector2();
-  const sb = new THREE.Vector2();
 
   /** Точка сцены (меняется на месте) в пикселях окна. false, если она за камерой или вплотную к ней: там проекция уходит в бесконечность. */
   const toScreen = (point: THREE.Vector3, out: THREE.Vector2): boolean => toPixels(point, camera, width, height, out) > 1;
@@ -146,19 +134,7 @@ export function mountView(layers: Layers, onStop: () => void): VerstDebug | null
       renderer.setDrawingBufferSize(w, h, r);
       lamp.setViewport(w, h);
     }
-    const frame = frameToRect(w, h, FOV, stage, model.radius, FILL);
-    camera.aspect = w / h;
-    camera.near = Math.max(0.1, frame.distance - DEPTH_BEFORE);
-    camera.far = frame.distance + DEPTH_BEHIND;
-    camera.updateProjectionMatrix();
-    // Сдвиг проекции переносит лампу в рамку метки, не меняя ракурса: камера по-прежнему смотрит на неё прямо.
-    camera.projectionMatrix.elements[8] = -frame.shiftX;
-    camera.projectionMatrix.elements[9] = -frame.shiftY;
-    camera.projectionMatrixInverse.copy(camera.projectionMatrix).invert();
-    camera.position.copy(model.center).addScaledVector(VIEW_FROM, frame.distance);
-    camera.lookAt(model.center);
-    camera.updateMatrixWorld();
-    perUnit = h / (2 * tanHalf * frame.distance);
+    perUnit = frameCamera(camera, w, h, stage, model);
     return true;
   };
 
@@ -168,28 +144,9 @@ export function mountView(layers: Layers, onStop: () => void): VerstDebug | null
    */
   const lightPage = (): void => {
     const { level, power, origin, dir } = lamp.light();
-    let pool: string | null = null;
-    let opacity = 0;
-    if (dir.y < -0.08 && level > 0.01) {
-      // луч из центра панели вдоль её нормали упирается в стол
-      const reach = Math.min(-origin.y / dir.y, 14);
-      centre.set(origin.x + dir.x * reach, 0, origin.z + dir.z * reach);
-      const across = 1.7 + reach * 0.62;
-      const length = across * Math.min(1 / Math.max(-dir.y, 0.22), 2.4); // чем положе луч, тем длиннее пятно
-      along.set(dir.x, 0, dir.z).normalize();
-      const ahead =
-        toScreen(p.copy(centre).addScaledVector(along, length), sa) &&
-        toScreen(p.set(centre.x - along.z * across, 0, centre.z + along.x * across), sb) &&
-        toScreen(p.copy(centre), sc);
-      if (ahead) {
-        const m = [(sa.x - sc.x) / 100, (sa.y - sc.y) / 100, (sb.x - sc.x) / 100, (sb.y - sc.y) / 100].map((v) => v.toFixed(4));
-        pool = `matrix(${m.join(', ')}, ${sc.x.toFixed(1)}, ${sc.y.toFixed(1)})`;
-        opacity = level * THREE.MathUtils.clamp(1.35 - reach / 9, 0.3, 1);
-      }
-    }
-    if (pool === null) toScreen(p.set(origin.x, 0, origin.z), sc); // панель смотрит не на стол: свет спадает от подножия лампы
-    layers.setPool(pool, opacity);
-    layers.setLight(power, sc.x, sc.y);
+    const light = pageLight({ origin, dir, level, width, height, project: (point, out) => toPixels(point, camera, width, height, out) });
+    layers.setPool(light.pool ? `matrix(${light.pool.matrix.map((v, i) => v.toFixed(i < 4 ? 4 : 1)).join(', ')})` : null, light.pool?.opacity ?? 0);
+    layers.setLight(power, light.centre.x, light.centre.y);
   };
 
   const cleanups: Array<() => void> = [];
