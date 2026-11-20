@@ -9,6 +9,8 @@
 #
 # Запуск: bash scripts/deploy.sh [--dry-run]
 #         npm run deploy -- --dry-run      (без «--» npm заберёт флаг себе)
+# Скрипт печатает коммит, настоящую выкладку делает только из закоммиченных исходников сборки
+# (пробный запуск на грязном дереве предупреждает) и запускает npm test до npm run build.
 # Совместим с /bin/bash 3.2 (macOS): без mapfile, ассоциативных массивов и пустых массивов.
 # Проверки без сервера: bash scripts/deploy.test.sh (подключает этот файл без последней строки).
 set -euo pipefail
@@ -19,6 +21,8 @@ readonly HOST=netcup
 readonly DEST=/var/www/verst
 readonly STAGE=/var/www/.verst-incoming
 readonly BASE=https://lekzyrs.com/verst
+# Без запросов пароля, с пределом на соединение и keepalive: 4 пропущенных ответа по 15 с рвут сессию.
+readonly SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4"
 
 die() {
   echo "ABORT: $*" >&2
@@ -46,8 +50,10 @@ matches_re() {
   [[ $1 =~ $re ]]
 }
 
-# Все вызовы ssh идут через эту функцию: без запросов пароля и с ограничением на соединение.
-on_server() { ssh -o BatchMode=yes -o ConnectTimeout=15 "$HOST" "$@"; }
+# Все вызовы ssh идут через эту функцию с опциями из SSH_OPTS. Подстановка без кавычек нарочно:
+# в SSH_OPTS слова без пробелов и масок, а трасса переноса печатает ту же строку.
+# shellcheck disable=SC2086
+on_server() { ssh $SSH_OPTS "$HOST" "$@"; }
 
 # --- Шаг 1. Аргументы, константы, инструменты.
 
@@ -76,19 +82,41 @@ check_constants() {
   [ "$DEST" = /var/www/verst ] || die "DEST не совпадает с литералом"
   [ "$STAGE" = /var/www/.verst-incoming ] || die "STAGE не совпадает с литералом"
   [ "$BASE" = https://lekzyrs.com/verst ] || die "BASE не совпадает с литералом"
+  [ "$SSH_OPTS" = "-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4" ] \
+    || die "SSH_OPTS не совпадает с литералом"
 }
 
 require_tools() {
   local tool
   command -v brotli > /dev/null 2>&1 || die "нет brotli: без него не собрать сайдкар .br (brew install brotli)"
-  for tool in npm node gzip shasum openssl curl ssh tar awk cmp; do
+  for tool in npm node gzip shasum openssl curl ssh tar awk cmp git; do
     command -v "$tool" > /dev/null 2>&1 || die "нет $tool"
   done
+}
+
+# Происхождение: печатается коммит, настоящая выкладка идёт только из закоммиченных исходников
+# сборки. Пробный запуск на грязном дереве только предупреждает. Путь, которого нет (tilda/ до
+# её появления), git status пропускает без ошибки.
+check_provenance() {
+  local commit dirty
+  commit=$(git rev-parse --short HEAD) || die "не удалось узнать коммит (git rev-parse --short HEAD)"
+  echo "коммит: $commit"
+  dirty=$(git status --porcelain -- src scripts assets tilda package.json package-lock.json vite.config.ts tsconfig.json) \
+    || die "git status не выполнился: не проверить, закоммичены ли исходники сборки"
+  [ -n "$dirty" ] || return 0
+  echo "незакоммиченные изменения в исходниках сборки:" >&2
+  printf '%s\n' "$dirty" | sed 's/^/  /' >&2
+  if [ "$DRY" = 1 ]; then
+    echo "ВНИМАНИЕ: пробный запуск продолжается, но настоящая выкладка с этими изменениями откажет" >&2
+  else
+    die "настоящая выкладка только из закоммиченного дерева: закоммитьте или уберите изменения выше"
+  fi
 }
 
 # --- Шаг 2. Сборка и защита: бандл и шрифт с хэшем в имени, тег и адрес шрифта указывают на них.
 
 build_bundle() {
+  npm test || die "npm test не прошёл: сборки и выкладки не будет"
   npm run build
   node --check dist/verst.js
 }
@@ -312,7 +340,7 @@ publish_from_stage() {
     cmd="$cmd && mv -f $js $DEST/assets/"
   fi
   cmd="$cmd && cd / && rm -rf -- /var/www/.verst-incoming"
-  echo "+ ssh $HOST \"sudo -n sh -c '$cmd'\""
+  echo "+ ssh $SSH_OPTS $HOST \"sudo -n sh -c '$cmd'\""
   on_server "sudo -n sh -c '$cmd'" < "$tmp/send.sha256" \
     || die "перенос из $STAGE в $DEST/assets не завершён; проверьте сервер, STAGE удалится при следующем настоящем запуске"
 }
@@ -447,6 +475,7 @@ main() {
   parse_args "$@"
   check_constants
   require_tools
+  check_provenance
   tmp=$(mktemp -d)
   trap 'rm -rf "$tmp"' EXIT
 

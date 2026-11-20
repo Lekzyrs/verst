@@ -30,6 +30,8 @@ for tool in ssh curl scp sftp rsync; do
   chmod +x "$work/bin/$tool"
 done
 export PATH="$work/bin:$PATH"
+# git настоящий, но без глобального и системного конфига владельца: результат не зависит от машины.
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 # --- Фикстура.
 
@@ -43,6 +45,21 @@ if ! (cd "$work/fixture" && node "$ROOT/scripts/tag.mjs" > "$work/tag.out" 2>&1)
 fi
 fx_js=$(cd "$work/fixture/dist" && ls assets/verst-*.js)
 fx_font=$(cd "$work/fixture/dist" && ls assets/sofia-sans-*.woff2)
+fx_tag=$(cat "$work/fixture/dist/tag.txt")
+fx_font_url=$(cat "$work/fixture/dist/font.txt")
+# Фикстура — свой git-репозиторий с одним коммитом; dist/ в нём игнорируется, каталога tilda/ нет.
+mkdir -p "$work/fixture/src"
+printf 'export {};\n' > "$work/fixture/src/index.ts"
+printf '{ "name": "fixture" }\n' > "$work/fixture/package.json"
+printf 'fixture\n' > "$work/fixture/README.md"
+printf 'dist/\n' > "$work/fixture/.gitignore"
+if ! (cd "$work/fixture" && git -c init.defaultBranch=main init -q && git add -A \
+  && git -c user.name=fixture -c user.email=fixture@example.invalid commit -q -m fixture) > "$work/git.out" 2>&1; then
+  echo "git не создал репозиторий фикстуры:" >&2
+  cat "$work/git.out" >&2
+  exit 1
+fi
+fx_commit=$(cd "$work/fixture" && git rev-parse --short HEAD)
 
 # --- Общее начало каждого случая (выполняется внутри bash -c).
 
@@ -73,6 +90,59 @@ fake_remote_manifest() {
     printf "%s  ./%s\n" "$1" "$2" >> "$tmp/remote.sha256"
     shift 2
   done
+}
+# curl-заглушка, которая отвечает как настроенный Caddy: заголовки с CRLF, тела из dist/assets
+# (бандл как br или gzip по Accept-Encoding, иначе без сжатия; шрифт без сжатия), портфолио 200.
+serve_dist() {
+  curl() {
+    local out="" hdr="" wfmt="" enc="" url="" name body ctype ce=""
+    printf "curl %s\n" "$*" >> "$CASE/curl.log"
+    while [ "$#" -gt 0 ]; do
+      case "$1" in
+        -o) out=$2; shift 2 ;;
+        -D) hdr=$2; shift 2 ;;
+        -w) wfmt=$2; shift 2 ;;
+        --max-time) shift 2 ;;
+        -H)
+          case "$2" in "Accept-Encoding: "*) enc=${2#Accept-Encoding: } ;; esac
+          shift 2 ;;
+        -*) shift ;;
+        *) url=$1; shift ;;
+      esac
+    done
+    if [ "$url" = https://lekzyrs.com/ ]; then
+      [ -z "$wfmt" ] || printf "200"
+      return 0
+    fi
+    name=${url#https://lekzyrs.com/verst/assets/}
+    [ -f "dist/assets/$name" ] || return 22
+    body=dist/assets/$name
+    case "$name" in
+      *.js)
+        ctype="text/javascript; charset=utf-8"
+        case "$enc" in
+          *br*) ce=br; body=$body.br ;;
+          *gzip*) ce=gzip; body=$body.gz ;;
+        esac ;;
+      *.woff2) ctype=font/woff2 ;;
+      *) return 22 ;;
+    esac
+    if [ -n "$hdr" ]; then
+      {
+        printf "HTTP/2 200\r\n"
+        printf "access-control-allow-origin: *\r\n"
+        printf "cache-control: public, max-age=31536000, immutable\r\n"
+        [ -z "$ce" ] || printf "content-encoding: %s\r\n" "$ce"
+        printf "content-type: %s\r\n" "$ctype"
+        printf "vary: Accept-Encoding\r\n"
+        printf "x-content-type-options: nosniff\r\n"
+        printf "\r\n"
+      } > "$hdr"
+    fi
+    if [ -n "$out" ] && [ "$out" != /dev/null ]; then
+      cp "$body" "$out"
+    fi
+  }
 }
 '
 
@@ -132,6 +202,24 @@ expect_lines() {
     got=$(grep -c "" "$CASE/$1")
   fi
   if [ "$got" = "$2" ]; then pass "$1: строк $2"; else fail "$1: строк $got, ожидалось $2"; fi
+}
+
+# expect_line <файл> <номер> <текст>: строка с этим номером равна тексту целиком.
+expect_line() {
+  local got=""
+  if [ -f "$CASE/$1" ]; then
+    got=$(sed -n "$2p" "$CASE/$1")
+  fi
+  if [ "$got" = "$3" ]; then pass "$1: строка $2 «$3»"; else fail "$1: строка $2 «$got», ожидалась «$3»"; fi
+}
+
+# expect_count <файл> <регулярное выражение> <число>: столько строк файла подходят.
+expect_count() {
+  local got=0
+  if [ -f "$CASE/$1" ]; then
+    got=$(grep -c -- "$2" "$CASE/$1")
+  fi
+  if [ "$got" = "$3" ]; then pass "$1: «$2» строк $3"; else fail "$1: «$2» строк $got, ожидалось $3"; fi
 }
 
 show_if_failed() {
@@ -281,11 +369,11 @@ expect_rc 1
 expect_in out "нужна разовая настройка сервера"
 show_if_failed
 
-run_case "листинг идёт через ssh с BatchMode и ConnectTimeout" '
+run_case "листинг идёт через ssh с BatchMode, ConnectTimeout и keepalive" '
   find_build_files
   fetch_remote_manifest; echo "строк: $(count_lines "$tmp/remote.sha256")"'
 expect_rc 0
-expect_in ssh.log "ssh -o BatchMode=yes -o ConnectTimeout=15 netcup sudo -n sh -c "
+expect_in ssh.log "ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 netcup sudo -n sh -c "
 expect_in out "строк: 0"
 show_if_failed
 
@@ -352,6 +440,27 @@ if [ "$rc" = 0 ]; then
     pass "шрифт переносится до бандла"
   else
     fail "нет mv шрифта"
+  fi
+  show_if_failed
+fi
+
+run_case "трасса переноса показывает ровно ту команду ssh, что выполняется" '
+  find_build_files; fake_local_manifest
+  fake_remote_manifest
+  plan_transfer
+  publish_from_stage'
+expect_rc 0
+expect_lines ssh.log 1
+expect_in out "+ ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4 netcup \"sudo -n sh -c '"
+show_if_failed
+if [ "$rc" = 0 ]; then
+  # Заглушка ssh пишет аргументы через пробел; трасса — те же слова, последний в двойных кавычках.
+  traced=$(sed -n 's/^+ //p' "$CASE/out" | tr -d '"')
+  called=$(sed -n 1p "$CASE/ssh.log")
+  if [ -n "$traced" ] && [ "$traced" = "$called" ]; then
+    pass "трасса равна вызову"
+  else
+    fail "трасса «$traced» не равна вызову «$called»"
   fi
   show_if_failed
 fi
@@ -427,6 +536,159 @@ expect_in out "--- проверки шрифта: https://lekzyrs.com/verst/asse
 expect_in out "FAIL  sha256 тела gzip"
 expect_in out "ABORT: проверки после выкладки не прошли"
 expect_in curl.log "Origin: https://verst-07.tilda.ws https://lekzyrs.com/verst/assets/sofia-sans-"
+show_if_failed
+
+run_case "check_bundle_url: сервер отвечает как надо, сбоев нет" '
+  find_build_files; check_tag; make_sidecars; serve_dist
+  CHECKS_FAILED=0
+  check_bundle_url
+  echo "CHECKS_FAILED=$CHECKS_FAILED"'
+expect_rc 0
+expect_in out "CHECKS_FAILED=0"
+expect_not_in out "FAIL  "
+expect_count out "^  ok    " 10
+expect_in out "ok    content-encoding (br,gzip): br"
+expect_in out "ok    content-encoding (gzip): gzip"
+expect_in out "ok    integrity тела: sha384-"
+expect_in out "ok    sha256 тела br: "
+expect_in out "ok    sha256 тела gzip: "
+expect_lines curl.log 5
+show_if_failed
+
+run_case "check_font_url: шрифт отдаётся как надо, сбоев нет" '
+  find_build_files; check_font_txt; serve_dist
+  CHECKS_FAILED=0
+  check_font_url
+  echo "CHECKS_FAILED=$CHECKS_FAILED"'
+expect_rc 0
+expect_in out "CHECKS_FAILED=0"
+expect_not_in out "FAIL  "
+expect_count out "^  ok    " 5
+expect_in out "ok    content-type: font/woff2"
+expect_in out "ok    sha256 тела: "
+expect_lines curl.log 2
+show_if_failed
+
+run_case "проверки после выкладки: всё в порядке, код 0" '
+  find_build_files; check_tag; check_font_txt; make_sidecars; serve_dist
+  post_deploy_checks; echo "проверки прошли"'
+expect_rc 0
+expect_in out "проверки прошли"
+expect_not_in out "FAIL  "
+expect_not_in out "ABORT"
+expect_count out "^  ok    " 16
+expect_in out "ok    https://lekzyrs.com/: 200"
+show_if_failed
+
+# --- main целиком (ssh, curl и npm — заглушки).
+
+run_case "main --dry-run: один вызов сервера (листинг), без tar и переноса, печатает шрифт и тег" '
+  main --dry-run; echo "не должно печататься"'
+expect_rc 0
+expect_lines ssh.log 1
+expect_in ssh.log "sudo -n sh -c 'test -d /var/www/verst || exit 3; cd /var/www/verst && find . -type f -print0 | sort -z | xargs -0 -r sha256sum'"
+expect_lines ssh.stdin.1 0
+expect_not_in ssh.log "tar "
+expect_not_in ssh.log "mv -f"
+expect_not_in ssh.log "rm -rf"
+expect_not_in ssh.log "sha256sum -c"
+expect_not_in out "+ ssh"
+expect_lines curl.log 0
+expect_in out "--- к отправке в /var/www/verst/assets/: 4"
+expect_in out "пробный запуск: на сервере ничего не записано"
+expect_in out "$fx_font_url"
+expect_in out "$fx_tag"
+expect_not_in out "выложено"
+expect_not_in out "не должно печататься"
+expect_line out 1 "коммит: $fx_commit"
+expect_not_in out "ВНИМАНИЕ"
+expect_lines npm.log 2
+expect_line npm.log 1 "npm test"
+expect_line npm.log 2 "npm run build"
+show_if_failed
+
+# --- Происхождение: коммит, чистое дерево исходников, npm test до сборки.
+
+run_case "npm test падает: сборки нет, сервер не тронут" '
+  npm() { printf "npm %s\n" "$*" >> "$CASE/npm.log"; [ "$1" != test ]; }
+  main --dry-run; echo "не должно печататься"'
+expect_rc 1
+expect_in out "ABORT: npm test не прошёл"
+expect_lines npm.log 1
+expect_line npm.log 1 "npm test"
+expect_lines ssh.log 0
+expect_not_in out "не должно печататься"
+show_if_failed
+
+run_case "грязное дерево: настоящая выкладка отказывает до сборки и до сервера" '
+  printf "// правка\n" >> src/index.ts
+  main; echo "не должно печататься"'
+expect_rc 1
+expect_line out 1 "коммит: $fx_commit"
+expect_in out "M src/index.ts"
+expect_in out "ABORT: настоящая выкладка только из закоммиченного дерева"
+expect_lines npm.log 0
+expect_lines ssh.log 0
+expect_not_in out "не должно печататься"
+show_if_failed
+
+run_case "грязное дерево: пробный запуск предупреждает и доходит до конца" '
+  printf "// правка\n" >> src/index.ts
+  : > src/new.ts
+  main --dry-run'
+expect_rc 0
+expect_line out 1 "коммит: $fx_commit"
+expect_in out "M src/index.ts"
+expect_in out "?? src/new.ts"
+expect_in out "ВНИМАНИЕ: пробный запуск продолжается"
+expect_not_in out "ABORT"
+expect_in out "пробный запуск: на сервере ничего не записано"
+expect_in out "$fx_tag"
+expect_lines npm.log 2
+expect_lines ssh.log 1
+show_if_failed
+
+run_case "грязным дерево делают только пути из списка; нет tilda/ — не ошибка" '
+  [ -e tilda ] || echo "tilda нет"
+  DRY=0
+  check_provenance > "$CASE/clean.out" 2>&1 && echo "чисто"
+  i=0
+  for p in src/index.ts src/new.ts scripts/x.sh assets/new.bin tilda/head.template.html package.json \
+           package-lock.json vite.config.ts tsconfig.json \
+           README.md docs/a.md tests/a.test.ts srcx/a.ts vite.config.js dist/extra.txt; do
+    i=$((i + 1))
+    cp -R "$CASE/root" "$CASE/w$i"
+    r=0
+    (cd "$CASE/w$i" && mkdir -p "$(dirname "$p")" && printf "x\n" >> "$p" && check_provenance) > "$CASE/w$i.out" 2>&1 || r=$?
+    if [ "$r" = 0 ]; then
+      echo "пропущено: $p"
+    elif grep -Fq "только из закоммиченного дерева" "$CASE/w$i.out"; then
+      echo "отказ: $p"
+    else
+      echo "другой сбой ($r): $p"
+    fi
+  done'
+expect_rc 0
+expect_in out "tilda нет"
+expect_in out "чисто"
+expect_in clean.out "коммит: $fx_commit"
+for p in src/index.ts src/new.ts scripts/x.sh assets/new.bin tilda/head.template.html package.json \
+  package-lock.json vite.config.ts tsconfig.json; do
+  expect_in out "отказ: $p"
+done
+for p in README.md docs/a.md tests/a.test.ts srcx/a.ts vite.config.js dist/extra.txt; do
+  expect_in out "пропущено: $p"
+done
+show_if_failed
+
+run_case "git status не выполнился: даже пробный запуск не начинается" '
+  git() { if [ "$1" = status ]; then echo "fatal: сбой" >&2; return 128; fi; command git "$@"; }
+  main --dry-run; echo "не должно печататься"'
+expect_rc 1
+expect_in out "ABORT: git status не выполнился"
+expect_lines npm.log 0
+expect_lines ssh.log 0
+expect_not_in out "не должно печататься"
 show_if_failed
 
 # --- Итог.
