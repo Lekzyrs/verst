@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { MAX_RATIO, PIXEL_BUDGET } from '../../src/core/pixelBudget';
+import { settled } from './open';
 import { asleep, frames, openScene, point, state } from './scene';
 
 // Без подсказки: рамка лампы меряется в покое.
@@ -32,12 +33,11 @@ function overflow(page: Page) {
 }
 
 async function expectInsideStage(page: Page, where: string): Promise<void> {
-  await expect
-    .poll(async () => { const o = await overflow(page); return Math.max(o.left, o.top, o.right, o.bottom); }, { message: `лампа внутри рамки сцены, ${where}` })
-    .toBeLessThanOrEqual(TOLERANCE);
-  const o = await overflow(page);
-  for (const side of ['left', 'top', 'right', 'bottom'] as const) expect(o[side], `выход за рамку сцены: ${side}, ${where}`).toBeLessThanOrEqual(TOLERANCE);
-  expect(Math.max(o.width, o.height), `лампа не мельче трети рамки, ${where}`).toBeGreaterThan(o.stage / 3);
+  await expect(async () => {
+    const o = await overflow(page);
+    for (const side of ['left', 'top', 'right', 'bottom'] as const) expect(o[side], `выход за рамку сцены: ${side}, ${where}`).toBeLessThanOrEqual(TOLERANCE);
+    expect(Math.max(o.width, o.height), `лампа не мельче трети рамки, ${where}`).toBeGreaterThan(o.stage / 3);
+  }).toPass({ timeout: 4000 });
 }
 
 const buffer = (page: Page) =>
@@ -56,8 +56,8 @@ for (const size of SIZES) {
     await openScene(page);
     await asleep(page);
     await expectInsideStage(page, sizeName(size));
+    await expect.poll(async () => fills(await buffer(page), size), { message: 'холст занимает окно' }).toBe(true);
     const b = await buffer(page);
-    expect(fills(b, size), 'холст занимает окно').toBe(true);
     expect(b.width * b.height, 'кадр в бюджете пикселей').toBeLessThanOrEqual(PIXEL_BUDGET);
   });
 }
@@ -72,8 +72,9 @@ test('лампа остаётся в рамке сцены при смене о�
     await expect.poll(async () => fills(await buffer(page), size), { message: 'холст принял новый размер окна' }).toBe(true);
     await asleep(page);
     await expectInsideStage(page, `после смены окна на ${sizeName(size)}`);
-    const b = await buffer(page);
-    expect(b.width / b.height, 'буфер холста повторяет пропорции окна').toBeCloseTo(size.width / size.height, 1);
+    await expect
+      .poll(async () => { const b = await buffer(page); return b.width / b.height; }, { message: 'буфер холста повторяет пропорции окна' })
+      .toBeCloseTo(size.width / size.height, 1);
   }
 });
 
@@ -81,7 +82,7 @@ test('лампа едет вместе со страницей при прокр
   await page.setViewportSize(SIZES[0]);
   await openScene(page);
   await asleep(page);
-  const before = await page.evaluate(() => window.__verst!.bounds());
+  const before = await settled(() => page.evaluate(() => window.__verst!.bounds()), 'рамка лампы устоялась');
   await page.evaluate(() => window.scrollTo(0, 200));
   await expect.poll(async () => (await page.evaluate(() => window.__verst!.bounds())).top, { message: 'лампа сдвинулась вверх на 200 px' }).toBeCloseTo(before.top - 200, 0);
   await expectInsideStage(page, 'после прокрутки');
