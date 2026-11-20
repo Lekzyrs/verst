@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
-# Выкладка бандла «Верст» на netcup. Отправляются только dist/assets/verst-<хэш>.js и его
-# сайдкары .br и .gz, в /var/www/verst/assets/. Страница на Tilda подключает файл тегом из
-# dist/tag.txt (integrity + crossorigin). dist/verst.js, .map и tag.txt на сервер не уходят.
+# Выкладка «Верст» на netcup. Отправляются только файлы с хэшем в имени из dist/assets:
+# бандл verst-<хэш>.js с сайдкарами .br и .gz и шрифт sofia-sans-<хэш>.woff2, в /var/www/verst/assets/.
+# Страница на Tilda подключает бандл тегом из dist/tag.txt (integrity + crossorigin), шрифт
+# через свой @font-face по адресу из dist/font.txt. dist/verst.js, .map, tag.txt и font.txt на сервер не уходят.
 #
-# Под /var/www/verst скрипт ничего не удаляет: старые бандлы остаются, и страница со старым
+# Под /var/www/verst скрипт ничего не удаляет: старые файлы остаются, и страница со старым
 # тегом продолжает работать. Удаляется только свой промежуточный каталог /var/www/.verst-incoming.
 #
 # Запуск: bash scripts/deploy.sh [--dry-run]
 #         npm run deploy -- --dry-run      (без «--» npm заберёт флаг себе)
 # Совместим с /bin/bash 3.2 (macOS): без mapfile, ассоциативных массивов и пустых массивов.
+# Проверки без сервера: bash scripts/deploy.test.sh (подключает этот файл без последней строки).
 set -euo pipefail
 export LC_ALL=C
 cd "$(dirname "$0")/.."
@@ -34,20 +36,34 @@ sha256_of() { shasum -a 256 "$1" | awk '{ print $1 }'; }
 sha384_b64() { openssl dgst -sha384 -binary "$1" | openssl base64 -A; }
 file_size() { wc -c < "$1" | tr -d ' '; }
 count_lines() { wc -l < "$1" | tr -d ' '; }
-matches_re() { printf '%s\n' "$1" | grep -Eq -- "$2"; }
+count_assets() { find dist/assets -mindepth 1 -maxdepth 1 -type f -name "$1" | wc -l | tr -d ' '; }
+asset_name() { find dist/assets -mindepth 1 -maxdepth 1 -type f -name "$1" | sed 's|^dist/assets/||'; }
+
+# Сопоставление со всей строкой: ^ и $ в [[ =~ ]] значат начало и конец строки, а не строки
+# текста, так что многострочное значение не пройдёт по одной подходящей строке.
+matches_re() {
+  local re=$2
+  [[ $1 =~ $re ]]
+}
+
+# Все вызовы ssh идут через эту функцию: без запросов пароля и с ограничением на соединение.
+on_server() { ssh -o BatchMode=yes -o ConnectTimeout=15 "$HOST" "$@"; }
 
 # --- Шаг 1. Аргументы, константы, инструменты.
 
 parse_args() {
-  if [ "$#" -gt 1 ]; then
-    usage
-  fi
-  case "${1:-}" in
-    "") DRY=0 ;;
-    --dry-run) DRY=1 ;;
+  case "$#" in
+    0) DRY=0 ;;
+    1)
+      if [ "$1" = --dry-run ]; then
+        DRY=1
+      else
+        usage
+      fi
+      ;;
     *) usage ;;
   esac
-  # «npm run deploy --dry-run» без «--» передаёт скрипту пустой аргумент и выставляет
+  # «npm run deploy --dry-run» без «--» не передаёт скрипту аргументов и выставляет
   # npm_config_dry_run=true. Без этой проверки такой запуск выложил бы по-настоящему.
   if [ "$DRY" = 0 ] && [ "${npm_config_dry_run:-}" = true ]; then
     echo "npm забрал --dry-run себе; пробный запуск: npm run deploy -- --dry-run" >&2
@@ -65,42 +81,51 @@ check_constants() {
 require_tools() {
   local tool
   command -v brotli > /dev/null 2>&1 || die "нет brotli: без него не собрать сайдкар .br (brew install brotli)"
-  for tool in npm node gzip shasum openssl curl ssh tar awk; do
+  for tool in npm node gzip shasum openssl curl ssh tar awk cmp; do
     command -v "$tool" > /dev/null 2>&1 || die "нет $tool"
   done
 }
 
-# --- Шаг 2. Сборка и защита: один файл с хэшем, тег указывает на него, integrity сходится.
+# --- Шаг 2. Сборка и защита: бандл и шрифт с хэшем в имени, тег и адрес шрифта указывают на них.
 
 build_bundle() {
   npm run build
   node --check dist/verst.js
 }
 
-find_hashed_bundle() {
-  local entries matches found links
+# Имя адресует содержимое: <префикс>-<первые 10 hex sha256>.<расширение>.
+check_content_name() {
+  local name=$1 prefix=$2 ext=$3 head
+  matches_re "$name" "^$prefix-[0-9a-f]{10}\\.$ext\$" || die "имя $name не похоже на $prefix-<10 hex>.$ext"
+  head=$(sha256_of "dist/assets/$name" | cut -c 1-10)
+  [ "$name" = "$prefix-$head.$ext" ] || die "хэш в имени $name не совпадает с sha256 файла ($head…)"
+}
+
+find_build_files() {
+  local entries links
   if [ ! -d dist/assets ] || [ -L dist/assets ]; then
     die "нет каталога dist/assets"
   fi
   links=$(find dist/assets -type l)
   [ -z "$links" ] || die "в dist/assets есть симлинки: $links"
-  # Скрипт умеет выкладывать ровно один бандл. Лишний файл в dist/assets значит, что сборка
-  # стала выпускать что-то ещё, и молча его не отправить хуже, чем остановиться.
+  # Скрипт знает ровно два файла: бандл и шрифт. Лишний файл значит, что сборка стала
+  # выпускать что-то ещё, и молча его не отправить хуже, чем остановиться.
   entries=$(find dist/assets -mindepth 1 | wc -l | tr -d ' ')
-  [ "$entries" = 1 ] || die "в dist/assets ожидался один файл, найдено $entries"
-  matches=$(find dist/assets -mindepth 1 -maxdepth 1 -type f -name 'verst-*.js' | wc -l | tr -d ' ')
-  [ "$matches" = 1 ] || die "под dist/assets/verst-*.js ожидался один файл, найдено $matches"
-  found=$(find dist/assets -mindepth 1 -maxdepth 1 -type f -name 'verst-*.js')
-  JS_NAME=${found#dist/assets/}
-  matches_re "$JS_NAME" '^verst-[0-9a-f]{10}\.js$' || die "имя $JS_NAME не похоже на verst-<10 hex>.js"
-  # Имя адресует содержимое: хэш в имени равен началу sha256 файла, а сам файл равен dist/verst.js,
-  # который проверил node --check.
-  [ "verst-$(sha256_of "dist/assets/$JS_NAME" | cut -c 1-10).js" = "$JS_NAME" ] \
-    || die "хэш в имени $JS_NAME не совпадает с sha256 файла"
+  [ "$entries" = 2 ] || die "в dist/assets ожидались два файла (бандл и шрифт), найдено $entries"
+  [ "$(count_assets 'verst-*.js')" = 1 ] || die "в dist/assets нет ровно одного verst-*.js"
+  [ "$(count_assets 'sofia-sans-*.woff2')" = 1 ] || die "в dist/assets нет ровно одного sofia-sans-*.woff2"
+  JS_NAME=$(asset_name 'verst-*.js')
+  FONT_NAME=$(asset_name 'sofia-sans-*.woff2')
+  check_content_name "$JS_NAME" verst js
+  check_content_name "$FONT_NAME" sofia-sans woff2
+  # Бандл равен dist/verst.js, который проверил node --check; шрифт равен исходнику из репозитория.
   cmp -s dist/verst.js "dist/assets/$JS_NAME" || die "dist/assets/$JS_NAME отличается от dist/verst.js"
+  cmp -s assets/fonts/SofiaSans-VF.woff2 "dist/assets/$FONT_NAME" \
+    || die "dist/assets/$FONT_NAME отличается от assets/fonts/SofiaSans-VF.woff2"
   JS="assets/$JS_NAME"
   BR="$JS.br"
   GZ="$JS.gz"
+  FONT="assets/$FONT_NAME"
 }
 
 check_tag() {
@@ -116,16 +141,33 @@ check_tag() {
   [ "$TAG_INTEGRITY" = "$want" ] || die "integrity в теге ($TAG_INTEGRITY) не равен sha384 файла ($want)"
 }
 
-# --- Шаг 3. Сайдкары рядом с файлом. gzip -n убирает имя и время, байты повторяемы.
+check_font_txt() {
+  [ -f dist/font.txt ] || die "нет dist/font.txt"
+  [ "$(count_lines dist/font.txt)" = 1 ] || die "в dist/font.txt ожидалась одна строка"
+  FONT_URL=$(cat dist/font.txt)
+  [ "$FONT_URL" = "$BASE/assets/$FONT_NAME" ] || die "dist/font.txt ($FONT_URL) не указывает на $BASE/assets/$FONT_NAME"
+}
+
+# --- Шаг 3. Сайдкары только для бандла: woff2 уже сжат. gzip -n убирает имя и время, байты повторяемы.
 
 make_sidecars() {
   brotli -q 11 -k -f "dist/$JS"
   gzip -9 -n -k -f "dist/$JS"
 }
 
+# Сайдкар распаковывается ровно в бандл: иначе браузер получил бы чужие байты под тем же URL.
+check_sidecars() {
+  local want br gz
+  want=$(sha256_of "dist/$JS")
+  br=$(brotli -dc "dist/$BR" | shasum -a 256 | awk '{ print $1 }') || die "dist/$BR не распаковывается"
+  gz=$(gzip -dc "dist/$GZ" | shasum -a 256 | awk '{ print $1 }') || die "dist/$GZ не распаковывается"
+  [ "$br" = "$want" ] || die "dist/$BR не распаковывается в dist/$JS"
+  [ "$gz" = "$want" ] || die "dist/$GZ не распаковывается в dist/$JS"
+}
+
 check_send_candidates() {
   local p
-  for p in "$BR" "$GZ" "$JS"; do
+  for p in "$BR" "$GZ" "$FONT" "$JS"; do
     matches_re "$p" '^assets/[A-Za-z0-9._-]+$' || die "путь $p не проходит проверку"
     case "$p" in
       assets/. | assets/..) die "путь $p не проходит проверку" ;;
@@ -136,12 +178,12 @@ check_send_candidates() {
   done
 }
 
-# --- Шаг 4. Манифесты: локальный по трём файлам и удалённый (только чтение).
+# --- Шаг 4. Манифесты: локальный по четырём файлам и удалённый (только чтение).
 
 make_local_manifest() {
   local p hash
   : > "$tmp/local.sha256"
-  for p in "$BR" "$GZ" "$JS"; do
+  for p in "$BR" "$GZ" "$FONT" "$JS"; do
     hash=$(sha256_of "dist/$p")
     printf '%s  %s\n' "$hash" "$p" >> "$tmp/local.sha256"
   done
@@ -149,7 +191,7 @@ make_local_manifest() {
 
 fetch_remote_manifest() {
   local rc=0 bad
-  ssh "$HOST" "sudo -n sh -c 'test -d $DEST || exit 3; cd $DEST && find . -type f -print0 | sort -z | xargs -0 -r sha256sum'" \
+  on_server "sudo -n sh -c 'test -d $DEST || exit 3; cd $DEST && find . -type f -print0 | sort -z | xargs -0 -r sha256sum'" \
     > "$tmp/remote.sha256" || rc=$?
   if [ "$rc" = 3 ]; then
     die "на сервере нет $DEST: нужна разовая настройка сервера (docs/deploy-notes.md, «Применение»)"
@@ -165,8 +207,8 @@ remote_hash_of() {
 }
 
 count_other_remote_files() {
-  awk -v a="./$JS" -v b="./$BR" -v c="./$GZ" \
-    '{ p = substr($0, 67) } p != a && p != b && p != c { n++ } END { print n + 0 }' "$tmp/remote.sha256"
+  awk -v a="./$JS" -v b="./$BR" -v c="./$GZ" -v d="./$FONT" \
+    '{ p = substr($0, 67) } p != a && p != b && p != c && p != d { n++ } END { print n + 0 }' "$tmp/remote.sha256"
 }
 
 add_to_send() {
@@ -174,8 +216,8 @@ add_to_send() {
   printf '%s  %s\n' "$1" "$2" >> "$tmp/send.sha256"
 }
 
-# Отправляется то, чего на сервере нет или что отличается. Файл .js с тем же именем и другим
-# содержимым — ошибка: имя адресует содержимое, его нельзя перезаписать. Сайдкар можно.
+# Отправляется то, чего на сервере нет или что отличается. Бандл или шрифт с тем же именем и
+# другим содержимым — ошибка: имя адресует содержимое, его нельзя перезаписать. Сайдкар можно.
 plan_transfer() {
   local hash path remote
   : > "$tmp/send"
@@ -187,7 +229,7 @@ plan_transfer() {
       add_to_send "$hash" "$path"
     elif [ "$remote" = "$hash" ]; then
       printf '%s\n' "$path" >> "$tmp/present"
-    elif [ "$path" = "$JS" ]; then
+    elif [ "$path" = "$JS" ] || [ "$path" = "$FONT" ]; then
       die "на сервере уже лежит $path с другим содержимым (sha256 $remote, локально $hash). Файл с хэшем в имени не перезаписывается: разберитесь вручную"
     else
       echo "сайдкар $path на сервере отличается (sha256 $remote), будет отправлен заново"
@@ -204,7 +246,7 @@ print_plan() {
   while read -r p; do
     size=$(file_size "dist/$p")
     bytes=$((bytes + size))
-    printf '  %-32s %9s байт\n' "$p" "$size"
+    printf '  %-34s %9s байт\n' "$p" "$size"
   done < "$tmp/send"
   echo "  всего $bytes байт"
   echo "--- уже на сервере, не отправляются: $(count_lines "$tmp/present")"
@@ -212,38 +254,40 @@ print_plan() {
     printf '  %s\n' "$p"
   done < "$tmp/present"
   echo "--- удалений нет: под $DEST скрипт ничего не удаляет (прочих файлов на сервере: $(count_other_remote_files))"
-  echo "URL: $BASE/assets/$JS_NAME"
+  echo "URL бандла: $BASE/assets/$JS_NAME"
 }
 
-print_tag() {
+print_links() {
+  echo "шрифт для @font-face (dist/font.txt):"
+  cat dist/font.txt
   echo "тег для Tilda (dist/tag.txt):"
   cat dist/tag.txt
 }
 
-# --- Шаг 6. Выкладка: проверка симлинков, промежуточный каталог, атомарный mv.
-
-refuse_remote_symlinks() {
-  local links
-  links=$(ssh "$HOST" "sudo -n find $DEST -type l") || die "не удалось проверить симлинки под $DEST"
-  [ -z "$links" ] || die "под $DEST есть симлинки, выкладка отменена: $links"
-}
+# --- Шаг 6. Выкладка: остаток STAGE, проверка симлинков, промежуточный каталог, атомарный mv.
 
 remove_leftover_stage() {
   # Удаление только по литералу пути: эта команда не может задеть другой каталог.
-  ssh "$HOST" "sudo -n rm -rf -- /var/www/.verst-incoming" || die "не удалось убрать старый $STAGE"
+  on_server "sudo -n rm -rf -- /var/www/.verst-incoming" || die "не удалось убрать старый $STAGE"
+}
+
+refuse_remote_symlinks() {
+  local links
+  links=$(on_server "sudo -n find $DEST -type l") || die "не удалось проверить симлинки под $DEST"
+  [ -z "$links" ] || die "под $DEST есть симлинки, выкладка отменена: $links"
 }
 
 upload_to_stage() {
   (cd dist && COPYFILE_DISABLE=1 tar --format ustar --no-xattrs --no-mac-metadata -cf - -T "$tmp/send") \
-    | ssh "$HOST" "sudo -n sh -c 'install -d -m 700 $STAGE && tar -xf - --no-same-owner --no-same-permissions -C $STAGE'" \
-    || die "передача в $STAGE не удалась; каталог удалится при следующем запуске"
+    | on_server "sudo -n sh -c 'install -d -m 700 $STAGE && tar -xf - --no-same-owner --no-same-permissions -C $STAGE'" \
+    || die "передача в $STAGE не удалась; каталог удалится при следующем настоящем запуске"
 }
 
-# Одним sudo sh -c: владелец и режимы, сверка sha256 уже на сервере, затем mv в DEST/assets
-# (сначала сайдкары, .js последним) и удаление STAGE по литералу. На stdin идёт манифест
-# отправленных файлов: mv не начнётся, если байты в STAGE не совпали с локальными.
+# Одним sudo sh -c: сверка sha256 сразу после cd в STAGE, затем владелец и режимы, mv в
+# DEST/assets (шрифт и сайдкары сначала, бандл последним) и удаление STAGE по литералу.
+# На stdin идёт манифест отправленных файлов: ничего не тронется, если байты не совпали.
 publish_from_stage() {
-  local files="" sidecars="" js="" p cmd
+  local files="" before_js="" js="" p cmd
   while read -r p; do
     if [ -z "$files" ]; then
       files=$p
@@ -253,15 +297,15 @@ publish_from_stage() {
     if [ "$p" = "$JS" ]; then
       js=$p
     else
-      sidecars="$sidecars $p"
+      before_js="$before_js $p"
     fi
   done < "$tmp/send"
   cmd="cd $STAGE"
+  cmd="$cmd && sha256sum -c --strict --quiet -"
   cmd="$cmd && chown root:root $files"
   cmd="$cmd && chmod 644 $files"
-  cmd="$cmd && sha256sum -c --strict --quiet -"
   cmd="$cmd && install -d -o root -g root -m 755 $DEST/assets"
-  for p in $sidecars; do
+  for p in $before_js; do
     cmd="$cmd && mv -f $p $DEST/assets/"
   done
   if [ -n "$js" ]; then
@@ -269,8 +313,8 @@ publish_from_stage() {
   fi
   cmd="$cmd && cd / && rm -rf -- /var/www/.verst-incoming"
   echo "+ ssh $HOST \"sudo -n sh -c '$cmd'\""
-  ssh "$HOST" "sudo -n sh -c '$cmd'" < "$tmp/send.sha256" \
-    || die "перенос из $STAGE в $DEST/assets не завершён; проверьте сервер, STAGE удалится при следующем запуске"
+  on_server "sudo -n sh -c '$cmd'" < "$tmp/send.sha256" \
+    || die "перенос из $STAGE в $DEST/assets не завершён; проверьте сервер, STAGE удалится при следующем настоящем запуске"
 }
 
 # --- Шаг 7. Проверки после выкладки. Любой сбой даёт код 1, автоотката нет.
@@ -305,6 +349,16 @@ fetch_body() {
   fi
 }
 
+# sha256 распакованного тела; если распаковать нельзя, вместо хэша печатается причина.
+decoded_sha256() {
+  local tool=$1 body=$2
+  if "$tool" -dc "$body" > "$body.decoded" 2> /dev/null; then
+    sha256_of "$body.decoded"
+  else
+    echo "не распаковывается $tool"
+  fi
+}
+
 status_of() { awk 'NR == 1 { print $2 }' "$1"; }
 
 header_of() {
@@ -318,10 +372,10 @@ header_of() {
     }' "$2"
 }
 
-post_deploy_checks() {
-  local url="$BASE/assets/$JS_NAME" decoded code
-  CHECKS_FAILED=0
-  echo "--- проверки после выкладки: $url"
+check_bundle_url() {
+  local url="$BASE/assets/$JS_NAME" want
+  want=$(sha256_of "dist/$JS")
+  echo "--- проверки бандла: $url"
 
   # 7а. Ответ на br,gzip с Origin страницы Tilda: статус и заголовки.
   fetch_headers "$tmp/h.br" -H 'Accept-Encoding: br,gzip' -H 'Origin: https://verst-07.tilda.ws' "$url"
@@ -340,16 +394,32 @@ post_deploy_checks() {
   fetch_body "$tmp/body.identity" -H 'Accept-Encoding: identity' "$url"
   check_equal "integrity тела" "sha384-$(sha384_b64 "$tmp/body.identity")" "$TAG_INTEGRITY"
 
-  # 7г. Тело br после brotli -dc совпадает с локальным файлом (локальный curl без brotli).
+  # 7г. Тела br и gzip после распаковки совпадают с локальным файлом (локальный curl без brotli).
   fetch_body "$tmp/body.br" -H 'Accept-Encoding: br' "$url"
-  if brotli -dc "$tmp/body.br" > "$tmp/body.br.decoded" 2> /dev/null; then
-    decoded=$(sha256_of "$tmp/body.br.decoded")
-  else
-    decoded="не распаковывается brotli"
-  fi
-  check_equal "sha256 тела br" "$decoded" "$(sha256_of "dist/$JS")"
+  check_equal "sha256 тела br" "$(decoded_sha256 brotli "$tmp/body.br")" "$want"
+  fetch_body "$tmp/body.gz" -H 'Accept-Encoding: gzip' "$url"
+  check_equal "sha256 тела gzip" "$(decoded_sha256 gzip "$tmp/body.gz")" "$want"
+}
 
-  # 7д. Портфолио на месте.
+check_font_url() {
+  echo "--- проверки шрифта: $FONT_URL"
+  # 7д. Шрифт: запрос как из браузера на странице Tilda, тело без сжатия равно файлу.
+  fetch_headers "$tmp/h.font" -H 'Accept-Encoding: br,gzip' -H 'Origin: https://verst-07.tilda.ws' "$FONT_URL"
+  check_equal "статус" "$(status_of "$tmp/h.font")" 200
+  check_equal "content-type" "$(header_of content-type "$tmp/h.font")" font/woff2
+  check_equal "cache-control" "$(header_of cache-control "$tmp/h.font")" "public, max-age=31536000, immutable"
+  check_equal "access-control-allow-origin" "$(header_of access-control-allow-origin "$tmp/h.font")" "*"
+  fetch_body "$tmp/body.font" -H 'Accept-Encoding: identity' "$FONT_URL"
+  check_equal "sha256 тела" "$(sha256_of "$tmp/body.font")" "$(sha256_of "dist/$FONT")"
+}
+
+post_deploy_checks() {
+  local code
+  CHECKS_FAILED=0
+  check_bundle_url
+  check_font_url
+
+  # 7е. Портфолио на месте.
   code=$(curl -s -o /dev/null --max-time 30 -w '%{http_code}' https://lekzyrs.com/ || true)
   check_equal "https://lekzyrs.com/" "$code" 200
 
@@ -360,9 +430,9 @@ post_deploy_checks() {
 }
 
 deploy_for_real() {
+  remove_leftover_stage
   if [ -s "$tmp/send" ]; then
     refuse_remote_symlinks
-    remove_leftover_stage
     upload_to_stage
     publish_from_stage
   else
@@ -370,7 +440,7 @@ deploy_for_real() {
   fi
   post_deploy_checks
   echo "выложено"
-  print_tag
+  print_links
 }
 
 main() {
@@ -381,9 +451,11 @@ main() {
   trap 'rm -rf "$tmp"' EXIT
 
   build_bundle
-  find_hashed_bundle
+  find_build_files
   check_tag
+  check_font_txt
   make_sidecars
+  check_sidecars
   check_send_candidates
   make_local_manifest
   fetch_remote_manifest
@@ -392,7 +464,7 @@ main() {
 
   if [ "$DRY" = 1 ]; then
     echo "пробный запуск: на сервере ничего не записано, проверки после выкладки пропущены"
-    print_tag
+    print_links
     exit 0
   fi
   deploy_for_real
